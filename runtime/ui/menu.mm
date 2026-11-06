@@ -154,6 +154,7 @@ static char g_kbd_text[1024];
 static int g_kbd_max = 8;
 static std::atomic<bool> g_kbd_chat{false};
 static std::atomic<unsigned> g_kbd_sequence{0};
+static std::atomic<float> g_chat_send_left{0}, g_chat_send_top{0}, g_chat_send_right{0}, g_chat_send_bottom{0};
 // (DevTools, runtime/ui/devtools.mm - weak: absent from a build without it)
 extern "C" __attribute__((weak)) bool devtools_open(void);
 extern "C" __attribute__((weak)) void devtools_toggle(void);
@@ -274,6 +275,15 @@ bool menu_handle_event(const SDL_Event *e) {
         { QEvent q = {}; q.kind = QEvent::MOUSE_POS; q.x = e->motion.x * g_pixel_density; q.y = e->motion.y * g_pixel_density; push(q); }
         return capturing();  // (DevTools only: the game gets it too)
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (g_kbd_chat.load() && g_kbd.load() == 1 && e->type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            e->button.button == SDL_BUTTON_LEFT) {
+            float x = e->button.x * g_pixel_density, y = e->button.y * g_pixel_density;
+            if (x >= g_chat_send_left.load() && x < g_chat_send_right.load() &&
+                y >= g_chat_send_top.load() && y < g_chat_send_bottom.load()) {
+                g_kbd = 2;  // Return the message to the mod, which sends it.
+                return true;
+            }
+        }
         if (!capturing() && !dt_open()) return false;  // (DevTools: its panels, and the game below)
         {
             QEvent q = {};
@@ -322,7 +332,7 @@ void menu_apply_window_requests(void *win) {
 // ------------------------------------------------------------------ render thread
 static bool g_inited;
 static ImGuiContext *g_ctx;  // ours: the start screen (back to it after a reboot) has its own context
-static ImFont *g_font, *g_font_big;
+static ImFont *g_font, *g_font_big, *g_chat_font;
 static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Baloo 2); everything else keeps g_font
 static int g_tab, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
@@ -418,6 +428,14 @@ static void init(void) {
         g_menu_font_big = io.Fonts->AddFontFromFileTTF(baloo, 72, &cfg);
     }
     if (!g_font) g_font = io.Fonts->AddFontDefault();
+    // A smaller fixed-width font fits the Lumiose chat field and its existing text.
+    const char *chat_paths[] = {"C:/Windows/Fonts/consola.ttf", bundled};
+    for (const char *p : chat_paths) {
+        if (!p) continue;
+        if (FILE *f = fopen(p, "rb")) fclose(f); else continue;
+        g_chat_font = io.Fonts->AddFontFromFileTTF(p, 16, &cfg);
+        if (g_chat_font) break;
+    }
     if (!g_font_big) g_font_big = g_font;
     if (!g_menu_font || !g_menu_font_big) g_menu_font = g_font, g_menu_font_big = g_font_big;
     style_init();
@@ -1120,16 +1138,23 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
         // The mod lays out its chat at the lower left of a 1920x1080 HUD.
         // Draw only the editable text field over the mod's existing input row.
         float hud = io.DisplaySize.y / 1080.0f;
-        ImGui::SetNextWindowPos(ImVec2(20 * hud, io.DisplaySize.y - 43 * hud), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(500 * hud, 32 * hud), ImGuiCond_Always);
+        float top = io.DisplaySize.y - 46 * hud;
+        g_chat_send_left = 394 * hud; g_chat_send_right = 462 * hud;
+        g_chat_send_top = top; g_chat_send_bottom = top + 32 * hud;
+        ImGui::SetNextWindowPos(ImVec2(20 * hud, top + 2 * hud), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(367 * hud, 24 * hud), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * hud, 3 * hud));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 1.0f * hud);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.03f, 0.08f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.03f, 0.08f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.03f, 0.08f, 0.10f, 1.0f));
         ImGui::Begin("##lumiose-chat-input", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+        if (g_chat_font) ImGui::PushFont(g_chat_font);
+        else ImGui::SetWindowFontScale(16.0f / 34.0f);
         static unsigned focused_sequence;
         unsigned sequence = g_kbd_sequence.load();
         if (focused_sequence != sequence) { ImGui::SetKeyboardFocusHere(); focused_sequence = sequence; }
@@ -1139,9 +1164,11 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
                          ImGuiInputTextFlags_CallbackCharFilter,
                          [](ImGuiInputTextCallbackData *d) -> int { return d->EventChar < 0x20 ? 1 : 0; });
         kbd_cut(g_kbd_text, g_kbd_max);
+        if (g_chat_font) ImGui::PopFont();
+        else ImGui::SetWindowFontScale(1.0f);
         ImGui::End();
         ImGui::PopStyleColor(4);
-        ImGui::PopStyleVar(2);
+        ImGui::PopStyleVar(4);
         return;
     }
     ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 120));

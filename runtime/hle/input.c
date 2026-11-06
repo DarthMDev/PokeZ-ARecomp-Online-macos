@@ -670,6 +670,10 @@ uint32_t g_window_resize_request;  // (W << 16 | H: menu_apply_window_requests a
 static void test_push(uint64_t frame, unsigned long start, unsigned long len, const char *dev, const char *arg) {
     SDL_Event e;
     memset(&e, 0, sizeof e);
+    if (!strcmp(dev, "quit")) {
+        if (frame == start) { e.type = SDL_EVENT_QUIT; SDL_PushEvent(&e); }
+        return;
+    }
     if (!strcmp(dev, "resize")) {
         unsigned w = 0, h = 0;
         if (frame == start && sscanf(arg, "%ux%u", &w, &h) == 2 && w && h && w < 65536 && h < 65536) {
@@ -770,7 +774,7 @@ static void host_test_frame(uint64_t frame) {
             char dev[8] = "", name[400] = "";
             if (sscanf(tok, "%lu:%7[a-z]:%399[^:]:%lu", &start, dev, name, &len) < 3) continue;
             if (!strcmp(dev, "type") || !strcmp(dev, "sdlpad") || !strcmp(dev, "sdlkey") || !strcmp(dev, "shot") ||
-                !strcmp(dev, "resize") || !strcmp(dev, "mouse")) {
+                !strcmp(dev, "resize") || !strcmp(dev, "mouse") || !strcmp(dev, "quit")) {
                 test_push(frame, start, len, dev, name);
                 continue;
             }

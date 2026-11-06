@@ -1357,6 +1357,19 @@ bool plat_onedrive_synced(const char *dir) {
 }
 
 // End the process at once, skipping DLL teardown (from an atexit handler, after flushing). Exit status 0.
+// Once the user closes the window, a driver or guest thread can stall shutdown.
+// Do not leave an invisible process holding the launcher open forever.
+static DWORD WINAPI shutdown_watchdog(void *unused) {
+    (void)unused;
+    Sleep(10000);
+    TerminateProcess(GetCurrentProcess(), 0);
+    return 0;
+}
+void plat_shutdown_watchdog_start(void) {
+    HANDLE thread = CreateThread(NULL, 0, shutdown_watchdog, NULL, 0, NULL);
+    if (thread) CloseHandle(thread);
+}
+
 void plat_terminate(void) {  // (exit()'s last handler, runtime/nvn/vulkan/device.c: the others registered after
     run_end();                 // ours never run - so the run's end is marked here)
     publish_log();

@@ -2572,7 +2572,18 @@ int ui_run(void) {
                 input_rumble_stop();
                 input_led_stop();
                 LOG("window closed\n");
-                backend_quit();  // (before exit(): see there)
+#ifdef _WIN32
+                extern void plat_shutdown_watchdog_start(void);
+                plat_shutdown_watchdog_start();
+                const char *test_stall = getenv("LARECOMP_TEST_QUIT_STALL_MS");
+                if (test_stall) SDL_Delay((Uint32)strtoul(test_stall, NULL, 10));
+#endif
+                backend_quit();
+#ifdef _WIN32
+                if (validating) validation_exit();
+                fflush(stdout); fflush(stderr);
+                plat_terminate();  // Avoid unrelated CRT exit handlers stalling with guest threads still running.
+#endif
                 exit(0);
             }
             extern bool input_user_blocked(const SDL_Event *e);
