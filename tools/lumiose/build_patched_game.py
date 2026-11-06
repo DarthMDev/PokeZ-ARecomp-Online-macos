@@ -36,7 +36,7 @@ def prepare(src):
     args = [zig, 'cc', '-O1', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing', '-Wno-return-type',
             '-Wno-unused-label', '-fvisibility=hidden', '-mcpu=x86_64_v3', '-I', str(source / 'runtime'),
             '-c', str(src), '-o', str(out)]
-    if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
+    if not WINDOWS: args[2:2] = ['-fPIC', '-DGUEST_VOLATILE', '-target', 'x86_64-linux-gnu']
     result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f'{src.name}: {result.stderr[-4000:]}')
@@ -59,7 +59,7 @@ if not game_id or any(c not in '0123456789abcdefABCDEF-v' for c in game_id):
 args = [zig, 'cc', '-O1', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing',
         '-fvisibility=hidden', '-mcpu=x86_64_v3', '-DGAMELIB_ID="' + game_id + '"',
         '-I', str(source / 'runtime'), '-c', str(source / 'tools' / 'gamelib_entry.c'), '-o', str(entry_obj)]
-if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
+if not WINDOWS: args[2:2] = ['-fPIC', '-DGUEST_VOLATILE', '-target', 'x86_64-linux-gnu']
 result = subprocess.run(args, env=env, capture_output=True, text=True)
 if result.returncode:
     raise RuntimeError(f'gamelib_entry.c: {result.stderr[-4000:]}')

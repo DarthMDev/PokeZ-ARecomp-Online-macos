@@ -26,7 +26,7 @@ def compile_one(src):
     out = objdir / (src.stem + '.o')
     args = [zig, 'cc', '-O0', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-DLUMIOSE_TEST_CODE',
             '-I', str(source / 'runtime'), '-c', str(src), '-o', str(out)]
-    if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
+    if not WINDOWS: args[2:2] = ['-fPIC', '-DGUEST_VOLATILE', '-target', 'x86_64-linux-gnu']
     result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f'{src.name}: {result.stderr}')

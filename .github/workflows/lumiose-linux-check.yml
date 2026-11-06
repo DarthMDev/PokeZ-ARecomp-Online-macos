@@ -34,6 +34,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/probe/generated" "$RUNNER_TEMP/probe/objects"
           cat > "$RUNNER_TEMP/probe/generated/stub.c" <<'EOF'
           #include "gamelib.h"
+          #ifndef GUEST_VOLATILE
+          #error Missing volatile guest memory accesses
+          #endif
           static void stub(Cpu *c) { (void)c; }
           const uint64_t lumiose_fn_addrs[] = {0x7006200000ull};
           const uint64_t lumiose_fn_count = 1;
@@ -48,6 +51,9 @@ jobs:
           for module in main sdk; do
             cat > "$RUNNER_TEMP/probe/generated/$module/${module}_table.c" <<EOF
           #include "gamelib.h"
+          #ifndef GUEST_VOLATILE
+          #error Missing volatile guest memory accesses
+          #endif
           static void stub(Cpu *c) { (void)c; }
           const uint64_t ${module}_fn_addrs[] = {0x7000000000ull};
           const uint64_t ${module}_fn_count = 1;

@@ -1,4 +1,4 @@
-name: Lumiose Linux package (experimental)
+name: Lumiose Linux package (memory access fix)
 on:
   push:
     branches: [codex/steamdeck-zig-probe]

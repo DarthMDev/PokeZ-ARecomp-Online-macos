@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from platform_paths import EXECUTABLE, GAME_LIBRARY, MODULE_LIBRARY, lock_file
+from platform_paths import WINDOWS, EXECUTABLE, GAME_LIBRARY, MODULE_LIBRARY, lock_file
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,11 +56,14 @@ def launch(config_path, prepare_only=False):
         state['download_hash'] = current_hash
         write_state(state_path, state)
         baseline = current_hash
-    # 1.3.11 was previously prepared without all UI switch targets. Refresh
-    # that exact installed build once, even when no newer download exists.
+    # Rebuild previously prepared Linux modules once with the same volatile
+    # guest-memory accesses used by the standard game build. Windows keeps its
+    # existing one-time 1.3.11 switch-table refresh.
     downloaded = bool(current_hash and current_hash != baseline)
-    refresh = (not downloaded and state.get('build_id') == 'c754ba10deedfed696a55010c8dd9131c508a647'
-               and state.get('compat_revision', 0) < 1)
+    linux_refresh = not WINDOWS and state.get('compat_revision', 0) < 2
+    switch_refresh = (state.get('build_id') == 'c754ba10deedfed696a55010c8dd9131c508a647'
+                      and state.get('compat_revision', 0) < 1)
+    refresh = not downloaded and (linux_refresh or switch_refresh)
     if refresh:
         if digest(active_module) != state.get('active_hashes', {}).get('subsdk9'):
             raise RuntimeError('The active mod failed verification')
@@ -97,7 +100,8 @@ def launch(config_path, prepare_only=False):
                 raise RuntimeError('The downloaded mod is not newer than the active version')
         versions = mod_dir / 'versions'
         versions.mkdir(exist_ok=True)
-        name = build_id + '-' + current_hash[:16] + ('-switch1' if refresh else '')
+        suffix = ('-volatile2' if linux_refresh else '-switch1') if refresh else ''
+        name = build_id + '-' + current_hash[:16] + suffix
         target = versions / name
         files = ((work / 'input' / 'exefs' / 'subsdk9', 'subsdk9'),
                  (work / MODULE_LIBRARY, MODULE_LIBRARY), (work / GAME_LIBRARY, GAME_LIBRARY),
@@ -112,7 +116,7 @@ def launch(config_path, prepare_only=False):
                 if digest(src) != digest(stage / dst): raise RuntimeError('An update file failed verification')
             os.replace(stage, target)
         state = {'download_hash': baseline if refresh else current_hash, 'build_id': build_id, 'version': version, 'version_dir': name,
-                 'compat_revision': 1,
+                 'compat_revision': 1 if WINDOWS else 2,
                  'active_hashes': {dst: digest(target / dst) for _, dst in files}}
         # The pointer is the only active-state change, after all three files exist.
         write_state(state_path, state)

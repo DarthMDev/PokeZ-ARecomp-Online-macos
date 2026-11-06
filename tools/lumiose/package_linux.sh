@@ -43,6 +43,9 @@ Extract the complete archive to a writable folder, including on an SD card.
 Run "Lumiose Online" from that folder in Desktop Mode. Python is included.
 Choose your own game files, update 2.0.2, and DLC during first-time setup.
 The game files and generated game code are not included.
+When updating, extract over your existing installation; do not remove its
+usr/bin/extracted, usr/bin/save, usr/bin/larecomp.ini or usr/bin/lumiose folders.
+Existing Linux installations will re-prepare Lumiose once on first launch.
 
 This build has not yet been validated end to end on a Steam Deck.
 EOF
