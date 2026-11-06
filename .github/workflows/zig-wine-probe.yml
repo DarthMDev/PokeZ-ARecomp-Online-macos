@@ -29,6 +29,7 @@ jobs:
           WINEDEBUG: '-all'
           WINEPREFIX: '${{ runner.temp }}/zig-wine-prefix'
         run: |
+          set +e
           set -u
           export PATH="/usr/lib/wine:$PATH"
           WINE=$(command -v wine64 || command -v wine)
