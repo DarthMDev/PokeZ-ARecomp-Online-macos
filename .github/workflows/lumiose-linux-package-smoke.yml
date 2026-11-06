@@ -1,0 +1,37 @@
+name: Lumiose Linux package smoke test
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+    paths: ['.github/workflows/lumiose-linux-package-smoke.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Lumiose-Online-linux-experimental
+          run-id: 42270102236
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Unpack and check packaged dependencies
+        run: |
+          unzip -q Lumiose-Online-linux-experimental.zip
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          test -x "$D/lasrecomp"
+          test -x "$D/zig/zig"
+          test -x "$D/python/bin/python3.12"
+          PYTHONPATH="$D/python-deps:$D/tools/lumiose" "$D/python/bin/python3.12" -c 'import capstone, unicorn, lz4, platform_paths; print("Bundled Python imports OK")'
+          "$D/zig/zig" version
+      - name: Show and capture the native launcher
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb xauth mesa-vulkan-drivers
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          mkdir -p "$RUNNER_TEMP/launcher-data"
+          LARECOMP_DATA_ROOT="$RUNNER_TEMP/launcher-data" LARECOMP_NO_UPDATE_CHECK=1 \
+          LARECOMP_LAUNCHER_SHOT=150 LARECOMP_SHOT_PATH="$RUNNER_TEMP/launcher.png" \
+            timeout 120 xvfb-run -a "$D/lasrecomp"
+          test -s "$RUNNER_TEMP/launcher.png"
