@@ -2,15 +2,13 @@
 
 <img src="docs/icon/icon_1024.png" alt="ZA Recomp" width="128">
 
-# ZA Recomp
+# ZA Recomp - Lumiose Online
 
-**A native PC port of *Pokémon Legends: Z-A*, built by static recompilation.**
+**A native PC port of *Pokémon Legends: Z-A* with Lumiose Online support, built by static recompilation.**
 
 **English** · [Português (Brasil)](README.pt-BR.md)
 
-[Download](https://github.com/Hexveil404/PokeZ-ARecomp/releases/latest) ·
-[Report a bug](https://github.com/Hexveil404/PokeZ-ARecomp/issues) ·
-[macOS port (MonZaMac)](https://github.com/lucabravi/MonZaMac)
+[Download](https://github.com/TheMagnumChad/PokeZ-ARecomp-Online/releases/latest) ·
 
 </div>
 
@@ -95,7 +93,7 @@ On a Mac, use [MonZaMac](https://github.com/lucabravi/MonZaMac) by
 
 ## Installation
 
-1. Download the latest `ZA-Recomp-windows.zip` from [Releases](https://github.com/Hexveil404/PokeZ-ARecomp/releases/latest)
+1. Download the latest `ZA-Recomp-windows.zip` from [Releases](https://github.com/TheMagnumChad/PokeZ-ARecomp-Online/releases/latest)
    and extract it to a folder of your choice (for example `C:\Games\ZA Recomp`).
 2. Prepare your own copy of the game in a folder, in one of two ways:
    - **Extracted game**: the `exefs` and `romfs` folders, as an emulator or your Switch extracts them. No keys needed.
@@ -255,8 +253,6 @@ card's **DirectX 12** driver, which helps where the Vulkan driver crashes or mis
   ([DirectX 12](#directx-12)).
 - **Low frame rate**: lower the internal resolution or turn on Dynamic resolution, and turn off the optional graphics
   features.
-- **Report a bug**: [open an issue](https://github.com/Hexveil404/PokeZ-ARecomp/issues) with your GPU, driver version,
-  game version and `logs/play.log`.
 
 ## Building from source
 
