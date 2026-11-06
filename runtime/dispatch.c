@@ -11,6 +11,7 @@
 #include "gamelib.h"
 #include "hle.h"
 #include "game_addresses.h"
+#include "lumiose_map_guard.h"
 
 typedef struct { const uint64_t *addrs; const GuestFn *fns; uint64_t count, lo, hi; } FnTable;
 static FnTable tables[3];
@@ -322,6 +323,11 @@ void rt_dispatch(Cpu *c) {
     bool lumiose_map_probe = g_nmodules > 2 &&
         (c->pc == MAIN_BASE + 0x649df8 || c->pc == MAIN_BASE + 0x649d34) &&
         c->x[30] >= g_modules[2].base && c->x[30] < g_modules[2].base + g_modules[2].text_size;
+    if (g_nmodules > 2 && lumiose_null_character_map(c->pc, MAIN_BASE, c->x[0], c->x[30],
+                                                      g_modules[2].base, g_modules[2].text_size)) {
+        LOG("[lumiose] skipped optional character-map lookup with no map\n");
+        return;  // Lumiose's caller treats a zero result as an absent entry.
+    }
     uint64_t count_offset = c->pc == MAIN_BASE + 0x649d34 ? 0x80 : 8;
     if (lumiose_map_probe && c->x[0] >= GUEST_LO && c->x[0] <= GUEST_HI - 0xb4) {
         uint64_t buckets = *(const uint64_t *)(uintptr_t)(c->x[0] + count_offset);
