@@ -57,6 +57,9 @@ def stage_archive(archive, stage):
             seen.add(raw)
             mode = info.external_attr >> 16
             if info.is_dir(): continue
+            # Older installations also use this path as their active mod, so
+            # never replace it as part of a launcher update.
+            if raw == 'usr/bin/lumiose/subsdk9': continue
             if not allowed(raw): raise RuntimeError('Archive contains an unexpected or protected file: ' + raw)
             if not (stat.S_ISREG(mode) or stat.S_ISLNK(mode) or stat.S_IFMT(mode) == 0):
                 raise RuntimeError('Archive contains an unsupported file type')
@@ -75,6 +78,7 @@ def stage_archive(archive, stage):
             out = stage / name
             out.parent.mkdir(parents=True, exist_ok=True)
             if stat.S_ISLNK(mode):
+                if info.file_size > 4096: raise RuntimeError('An update symbolic link is too long')
                 target = z.read(info).decode('utf-8')
                 resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
                 if target.startswith('/') or '\\' in target or resolved == '..' or resolved.startswith('../'):

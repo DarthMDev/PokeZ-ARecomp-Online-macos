@@ -28,7 +28,8 @@ class LinuxLauncherUpdateTests(unittest.TestCase):
         }
         for rel, data in {'Lumiose Online': b'old starter', 'usr/bin/lasrecomp': b'old executable',
                           'usr/bin/save/main': b'player save', 'usr/bin/larecomp.ini': b'player settings',
-                          'usr/bin/lumiose/update-state.json': b'player mod state'}.items():
+                          'usr/bin/lumiose/update-state.json': b'player mod state',
+                          'usr/bin/lumiose/subsdk9': b'active or reference mod'}.items():
             path = self.root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
@@ -49,12 +50,14 @@ class LinuxLauncherUpdateTests(unittest.TestCase):
                 z.writestr(info, target)
 
     def test_install_preserves_player_data_and_symlinks(self):
-        self.package({'usr/lib/libexample.so.1': b'library'}, {'usr/lib/libexample.so': 'libexample.so.1'})
+        self.package({'usr/lib/libexample.so.1': b'library', 'usr/bin/lumiose/subsdk9': b'release mod'},
+                     {'usr/lib/libexample.so': 'libexample.so.1'})
         update.install(self.root, self.archive)
         self.assertEqual((self.root / 'usr/bin/lasrecomp').read_bytes(), b'new executable')
         self.assertEqual((self.root / 'usr/bin/save/main').read_bytes(), b'player save')
         self.assertEqual((self.root / 'usr/bin/larecomp.ini').read_bytes(), b'player settings')
         self.assertEqual((self.root / 'usr/bin/lumiose/update-state.json').read_bytes(), b'player mod state')
+        self.assertEqual((self.root / 'usr/bin/lumiose/subsdk9').read_bytes(), b'active or reference mod')
         self.assertEqual(os.readlink(self.root / 'usr/lib/libexample.so'), 'libexample.so.1')
         self.assertTrue(os.access(self.root / 'Lumiose Online', os.X_OK))
         self.assertFalse((self.root / '.lumiose-update').exists())
