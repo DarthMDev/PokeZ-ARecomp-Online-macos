@@ -56,8 +56,19 @@ def launch(config_path, prepare_only=False):
         state['download_hash'] = current_hash
         write_state(state_path, state)
         baseline = current_hash
-    if current_hash and current_hash != baseline:
-        print('A Lumiose update was downloaded. Preparing it for ZA Recomp...', flush=True)
+    # 1.3.11 was previously prepared without all UI switch targets. Refresh
+    # that exact installed build once, even when no newer download exists.
+    downloaded = bool(current_hash and current_hash != baseline)
+    refresh = (not downloaded and state.get('build_id') == 'c754ba10deedfed696a55010c8dd9131c508a647'
+               and state.get('compat_revision', 0) < 1)
+    if refresh:
+        if digest(active_module) != state.get('active_hashes', {}).get('subsdk9'):
+            raise RuntimeError('The active mod failed verification')
+        candidate = active_module
+        current_hash = digest(candidate)
+    if downloaded or refresh:
+        print('Refreshing Lumiose compatibility...' if refresh else
+              'A Lumiose update was downloaded. Preparing it for ZA Recomp...', flush=True)
         # Keep all generated files outside the active installation until verified.
         work_root = mod_dir / 'update-work'
         work_root.mkdir(parents=True, exist_ok=True)
@@ -81,10 +92,12 @@ def launch(config_path, prepare_only=False):
                 any(not isinstance(x, int) or x < 0 for x in version)):
             raise RuntimeError('The prepared update has an invalid version')
         if tuple(version) <= tuple(state.get('version', [])):
-            raise RuntimeError('The downloaded mod is not newer than the active version')
+            if not (refresh and tuple(version) == tuple(state.get('version', [])) and
+                    build_id == state.get('build_id') and current_hash == state.get('active_hashes', {}).get('subsdk9')):
+                raise RuntimeError('The downloaded mod is not newer than the active version')
         versions = mod_dir / 'versions'
         versions.mkdir(exist_ok=True)
-        name = build_id + '-' + current_hash[:16]
+        name = build_id + '-' + current_hash[:16] + ('-switch1' if refresh else '')
         target = versions / name
         files = ((work / 'input' / 'exefs' / 'subsdk9', 'subsdk9'),
                  (work / 'lumiose.dll', 'lumiose.dll'), (work / 'lasgame.dll', 'lasgame.dll'),
@@ -98,7 +111,8 @@ def launch(config_path, prepare_only=False):
                 shutil.copy2(src, stage / dst)
                 if digest(src) != digest(stage / dst): raise RuntimeError('An update file failed verification')
             os.replace(stage, target)
-        state = {'download_hash': current_hash, 'build_id': build_id, 'version': version, 'version_dir': name,
+        state = {'download_hash': baseline if refresh else current_hash, 'build_id': build_id, 'version': version, 'version_dir': name,
+                 'compat_revision': 1,
                  'active_hashes': {dst: digest(target / dst) for _, dst in files}}
         # The pointer is the only active-state change, after all three files exist.
         write_state(state_path, state)

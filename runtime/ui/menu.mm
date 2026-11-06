@@ -1004,6 +1004,10 @@ static void tab_cosmetics(void) {
     opt_end();
 }
 
+extern "C" int audio_input_device_names(char names[][256], int max);
+extern "C" void audio_input_set_master_gain(float gain);
+extern "C" void audio_input_set_noise_suppression(bool enabled);
+extern "C" void audio_input_set_noise_strong(bool strong);
 static void tab_audio(void) {
     opt_begin("##audio", ImGui::GetFontSize() / 34);
     opt_section(TR("Sound", "Som"));
@@ -1017,6 +1021,56 @@ static void tab_audio(void) {
     opt_toggle(TR("Movie audio", "Som dos vídeos"), &g_settings.movie_audio, true,
                TR("Sound in the game's movies. Applies the next time a movie starts.",
                   "O som dos vídeos do jogo. Vale a partir do próximo vídeo."));
+    opt_section(TR("Microphone", "Microfone"));
+    {
+        static char devices[16][256];
+        static int count;
+        static Uint64 refreshed;
+        Uint64 now = SDL_GetTicks();
+        if (!refreshed || now - refreshed >= 2000) {
+            count = audio_input_device_names(devices, 16);
+            refreshed = now ? now : 1;
+        }
+        const char *names[18] = {TR("System default", "Padrão do sistema")};
+        int n = 1, selected = 0;
+        for (int i = 0; i < count; i++) {
+            names[n] = devices[i];
+            if (g_settings.mic_device[0] && !strcmp(devices[i], g_settings.mic_device)) selected = n;
+            n++;
+        }
+        char unavailable[300];
+        if (g_settings.mic_device[0] && !selected) {
+            snprintf(unavailable, sizeof unavailable, TR("Unavailable: %s", "Indisponível: %s"), g_settings.mic_device);
+            names[n] = unavailable; selected = n++;
+        }
+        if (opt_choice(TR("Input device", "Dispositivo de entrada"), &selected, names, n, 0,
+                       TR("Select the microphone for voice chat. Turn voice chat off and on to use a changed device.",
+                          "Escolha o microfone do chat de voz. Desative e reative o chat para usar outro dispositivo."))) {
+            if (selected == 0) g_settings.mic_device[0] = 0;
+            else if (selected <= count) snprintf(g_settings.mic_device, sizeof g_settings.mic_device, "%s", devices[selected - 1]);
+        }
+        float mic_pct = roundf(g_settings.mic_gain * (100.0f / 6.0f));
+        if (opt_slider(TR("Input level", "Nível de entrada"), &mic_pct, 0, 800, 25, 100, "%g%%",
+                       TR("Adjust the microphone level sent to voice chat. High levels can distort.",
+                          "Ajusta o nível do microfone no chat de voz. Níveis altos podem distorcer."))) {
+            g_settings.mic_gain = mic_pct * (6.0f / 100.0f);
+            audio_input_set_master_gain(g_settings.mic_gain);
+        }
+        if (opt_toggle(TR("Noise suppression", "Supressão de ruído"), &g_settings.mic_noise_suppression, false,
+                       TR("Reduce background noise from the microphone. Very quiet speech may also be reduced.",
+                          "Reduz ruído de fundo do microfone. Fala muito baixa também pode ser reduzida.")))
+            audio_input_set_noise_suppression(g_settings.mic_noise_suppression);
+        if (g_settings.mic_noise_suppression) {
+            const char *strengths[] = {TR("Standard", "Padrão"), TR("Strong", "Forte")};
+            int strength = g_settings.mic_noise_strong ? 1 : 0;
+            if (opt_choice(TR("Suppression strength", "Intensidade da supressão"), &strength, strengths, 2, 0,
+                           TR("Strong mutes background noise between words, but may soften very quiet speech.",
+                              "Forte silencia o ruído entre palavras, mas pode suavizar falas muito baixas."))) {
+                g_settings.mic_noise_strong = strength != 0;
+                audio_input_set_noise_strong(g_settings.mic_noise_strong);
+            }
+        }
+    }
     opt_end();
 }
 

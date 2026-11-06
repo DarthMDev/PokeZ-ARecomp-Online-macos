@@ -65,7 +65,7 @@ def main():
     config = {'install': str(install), 'reference': str(reference), 'vanilla': str(vanilla),
               'zig': str(zig), 'cache': str(game / '.gamebuild'), 'server': args.server}
     state = {'build_id': result['build_id'], 'version': result['version'], 'version_dir': version_dir,
-             'download_hash': seen, 'active_hashes': {name: sha(dest / name) for _, name in files}}
+             'compat_revision': 1, 'download_hash': seen, 'active_hashes': {name: sha(dest / name) for _, name in files}}
     (mod / 'config.json').write_text(json.dumps(config, indent=2) + '\n')
     tmp = state_path.with_suffix('.tmp')
     tmp.write_text(json.dumps(state, indent=2) + '\n')

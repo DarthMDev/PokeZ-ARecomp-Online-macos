@@ -38,6 +38,7 @@ def main():
     for n in ('DejaVuSans.ttf', 'DejaVuSans-Bold.ttf'):
         copy_file(ROOT / 'third_party/fonts/DejaVu' / n, out / n)
     copy_file(ROOT / 'third_party/fonts/DejaVu/LICENSE', out / 'DejaVu-LICENSE.txt')
+    copy_file(ROOT / 'third_party/rnnoise/COPYING', out / 'RNNOISE-LICENSE.txt')
     copy_file(ROOT / 'assets/lumiose_icon.png', out / 'icon.png')
     for n in ('zig', 'lasgen', 'zaimport', 'zaprompts'):
         src = a.support / n

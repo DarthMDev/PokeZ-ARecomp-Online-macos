@@ -88,6 +88,35 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(state['build_id'], 'b' * 40)
             self.assertTrue((self.mod / 'versions' / state['version_dir'] / 'lasgame.dll').is_file())
 
+    def test_installed_1311_is_refreshed_once(self):
+        build = 'c754ba10deedfed696a55010c8dd9131c508a647'
+        self.initial.update(build_id=build, version=[1, 3, 11, 0])
+        launcher.write_state(self.state, self.initial)
+        def prepare(cmd, **kwargs):
+            self.assertEqual(Path(cmd[cmd.index('--candidate') + 1]), self.mod / 'subsdk9')
+            work = Path(cmd[cmd.index('--work') + 1]); staged = work / 'input/exefs/subsdk9'
+            staged.parent.mkdir(parents=True); staged.write_bytes((self.mod / 'subsdk9').read_bytes())
+            (work / 'lumiose.dll').write_bytes(b'corrected module')
+            (work / 'lasgame.dll').write_bytes(b'matching game code')
+            (work / 'prepared.json').write_text(json.dumps({'build_id': build, 'version': [1, 3, 11, 0]}))
+            return type('Result', (), {'returncode': 0})()
+        with patch.object(launcher.subprocess, 'run', side_effect=prepare) as run, patch.object(launcher.subprocess, 'Popen'):
+            launcher.launch(self.config)
+            state = json.loads(self.state.read_text())
+            self.assertEqual(state['compat_revision'], 1)
+            self.assertTrue(state['version_dir'].endswith('-switch1'))
+            launcher.launch(self.config)
+            self.assertEqual(run.call_count, 1)
+
+    def test_refresh_failure_keeps_old_version(self):
+        self.initial.update(build_id='c754ba10deedfed696a55010c8dd9131c508a647', version=[1, 3, 11, 0])
+        launcher.write_state(self.state, self.initial)
+        with patch.object(launcher.subprocess, 'run') as run, patch.object(launcher.subprocess, 'Popen') as launch:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(RuntimeError, 'could not be prepared'): launcher.launch(self.config)
+            launch.assert_not_called()
+            self.assertEqual(json.loads(self.state.read_text()), self.initial)
+
     def test_older_download_is_not_activated(self):
         self.download.write_bytes(b'older download')
         def prepare(cmd, **kwargs):

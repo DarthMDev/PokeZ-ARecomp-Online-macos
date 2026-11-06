@@ -44,6 +44,13 @@ for offset, count, fmt, target_base in tables:
     for v in struct.unpack_from(f'<{count}{fmt}', mod.image, offset):
         entries['lumiose'].add(target_base + v * 4)
 
+# The mod also uses byte-indexed UI switches whose destinations may fall
+# inside other translated functions; collect every validated case target.
+from switch_tables import discover_byte_switches
+ui_targets, ui_tables = discover_byte_switches(mod.image, 0x7006200000, mod.text[1])
+entries['lumiose'].update(ui_targets)
+print('Validated byte switch tables:', ui_tables, flush=True)
+
 for name, base, old, new in modules:
     start, size = old.text
     for off in range(start, start + size - 3, 4):

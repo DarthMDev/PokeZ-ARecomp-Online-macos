@@ -49,6 +49,7 @@ Settings g_settings = {
     .aspect = ASPECT_UNLOCKED,
     .fullscreen = false,
     .volume = 1.0f,
+    .mic_gain = 6.0f,
     .reverb = true,
     .movie_audio = true,
     .rumble = true,
@@ -301,6 +302,10 @@ void settings_load(void) {
         if (!strcmp(key, "aspect")) g_settings.aspect = !strcmp(val, "original") ? ASPECT_ORIGINAL : ASPECT_UNLOCKED;
         else if (!strcmp(key, "fullscreen")) g_settings.fullscreen = atoi(val) != 0;
         else if (!strcmp(key, "volume")) g_settings.volume = (float)atof(val);
+        else if (!strcmp(key, "microphone_gain")) g_settings.mic_gain = (float)atof(val);
+        else if (!strcmp(key, "microphone_noise_suppression")) g_settings.mic_noise_suppression = atoi(val) != 0;
+        else if (!strcmp(key, "microphone_noise_strong")) g_settings.mic_noise_strong = atoi(val) != 0;
+        else if (!strcmp(key, "microphone_device")) strlcpy(g_settings.mic_device, val, sizeof g_settings.mic_device);
         else if (!strcmp(key, "reverb")) g_settings.reverb = atoi(val) != 0;
         else if (!strcmp(key, "movie_audio")) g_settings.movie_audio = atoi(val) != 0;
         else if (!strcmp(key, "show_fps")) g_settings.show_fps = atoi(val) != 0;
@@ -432,6 +437,7 @@ void settings_load(void) {
     if (!video_key) g_settings.video_rec = VREC_ASK;  // (a file from before the recommendation: offered once, not imposed)
     if (g_settings.volume < 0) g_settings.volume = 0;
     if (g_settings.volume > 2) g_settings.volume = 2;
+    if (!(g_settings.mic_gain >= 0 && g_settings.mic_gain <= 48)) g_settings.mic_gain = 6.0f;
     if (!(g_settings.mouse_sens >= 0.1f && g_settings.mouse_sens <= 5)) g_settings.mouse_sens = 1.0f;
     if (g_settings.rumble_strength < 25 || g_settings.rumble_strength > 100) g_settings.rumble_strength = 100;
     settings_env_overrides();
@@ -445,6 +451,10 @@ void settings_save(void) {
     fprintf(f, "aspect = %s\n", g_settings.aspect == ASPECT_ORIGINAL ? "original" : "unlocked");
     fprintf(f, "fullscreen = %d\n", g_settings.fullscreen);
     fprintf(f, "volume = %.2f\n", g_settings.volume);
+    fprintf(f, "microphone_gain = %.2f\n", g_settings.mic_gain);
+    fprintf(f, "microphone_noise_suppression = %d\n", g_settings.mic_noise_suppression);
+    fprintf(f, "microphone_noise_strong = %d\n", g_settings.mic_noise_strong);
+    fprintf(f, "microphone_device = %s\n", g_settings.mic_device);
     fprintf(f, "reverb = %d\n", g_settings.reverb);
     fprintf(f, "movie_audio = %d\n", g_settings.movie_audio);
     fprintf(f, "show_fps = %d\n", g_settings.show_fps);

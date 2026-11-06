@@ -59,6 +59,10 @@ typedef struct {
     bool dx12;           // Graphics API (Windows): DirectX 12 through the shipped Dozen (Mesa's Vulkan on Direct3D 12,
                          // dx12/ next to the exe) instead of the GPU's Vulkan driver (vulkan/device.c ui_window_init)
     float volume;        // master volume, 1 = 100%
+    float mic_gain;      // microphone multiplier, 6 = the default 100% input level
+    bool mic_noise_suppression; // optional local microphone noise reduction
+    bool mic_noise_strong; // extra attenuation between speech
+    char mic_device[256]; // recording device name; empty follows the system default
     bool reverb;         // room reverb effect
     bool movie_audio;
     bool show_fps;

@@ -131,6 +131,12 @@ GAMELIB_BASE_SRCS := runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/game
 GAMELIB_BASE_ID := $(shell (cat $(GAMELIB_BASE_SRCS); echo '$(GENFLAGS) $(GAMELIB_SHARED)') | \
                      (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
 
+RNNOISE_SRC := denoise rnn rnn_data rnn_reader pitch kiss_fft celt_lpc
+RNNOISE_OBJ := $(addprefix $(B)/rnnoise/,$(addsuffix .o,$(RNNOISE_SRC)))
+$(B)/rnnoise/%.o: third_party/rnnoise/src/%.c $(wildcard third_party/rnnoise/src/*.h) third_party/rnnoise/include/rnnoise.h
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -Ithird_party/rnnoise/include -Ithird_party/rnnoise/src -c $< -o $@
+
 RT_OBJ   := $(patsubst runtime/%.cpp,$(B)/rt/%.o,$(patsubst runtime/%.c,$(B)/rt/%.o,$(RT_SRC)))
 RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Iruntime/nvn $(DEPINC) $(OSFLAGS)
 CXXFLAGS := -O2 -g -std=c++17 -I$(IMGUI) -I$(IMGUI)/backends -Iruntime -Iruntime/nvn $(DEPINC)
@@ -211,7 +217,7 @@ $(B)/rt/%.o: runtime/%.m $(RT_HDRS)
 # linked to a temp file, then renamed over: a copy of the game still running keeps its (old) file - relinking in
 # place gets running copies killed by macOS (code signature of the changed pages). The temp file keeps the real name
 # (in a folder of its own): on Windows the import library records the name the game code library loads it by.
-$(EXE): $(RT_OBJ) $(BACKEND_OBJ) $(UI_OBJ) $(IMGUI_OBJ) $(if $(filter %vulkan/exec.o,$(BACKEND_OBJ)),$(FSR2_OBJ))
+$(EXE): $(RT_OBJ) $(RNNOISE_OBJ) $(BACKEND_OBJ) $(UI_OBJ) $(IMGUI_OBJ) $(if $(filter %vulkan/exec.o,$(BACKEND_OBJ)),$(FSR2_OBJ))
 	@mkdir -p $(dir $@)link
 	$(CXX) -o $(dir $@)link/$(notdir $@) $^ $(LDFLAGS)
 	mv -f $(dir $@)link/$(notdir $@) $@
