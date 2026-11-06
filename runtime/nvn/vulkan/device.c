@@ -1271,6 +1271,8 @@ static void create_swapchain(void) {
         .oldSwapchain = old};
     VkResult sr = vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain);
 #ifdef _WIN32
+    if (sr == VK_SUCCESS && !g_vk.dozen && ENV("LARECOMP_TEST_AMD_SWAPCHAIN_FAIL"))
+        vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL), g_vk.swapchain = VK_NULL_HANDLE, sr = VK_ERROR_UNKNOWN;
     if (sr == VK_SUCCESS && g_vk.dozen && ENV("LARECOMP_TEST_DX12_SWAPCHAIN_FAIL"))  // (tests what follows)
         vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL), g_vk.swapchain = VK_NULL_HANDLE, sr = VK_ERROR_OUT_OF_HOST_MEMORY;
 #endif
@@ -1291,8 +1293,30 @@ static void create_swapchain(void) {
             ci.compositeAlpha = (VkCompositeAlphaFlagBitsKHR)(caps.supportedCompositeAlpha & -caps.supportedCompositeAlpha);
         count = ci.minImageCount;
         sr = vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain);
+#ifdef _WIN32
+        if (sr == VK_SUCCESS && !g_vk.dozen && ENV("LARECOMP_TEST_AMD_SWAPCHAIN_FAIL"))
+            vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL), g_vk.swapchain = VK_NULL_HANDLE, sr = VK_ERROR_UNKNOWN;
+#endif
         LOG("[vk] swapchain again (fifo, %u images, no copies out): %s (%d)\n", count, sr == VK_SUCCESS ? "ok" : "failed", sr);
 #ifdef _WIN32
+        // Some AMD drivers reject both initial window swapchains. Try the bundled DirectX driver once;
+        // never restart a running game and never override an explicitly selected driver.
+        char dozen_icd[1100];
+        if (sr != VK_SUCCESS && !old && !g_vk.dozen &&
+            (g_vk.props.vendorID == 0x1002 || ENV("LARECOMP_TEST_AMD_SWAPCHAIN_FAIL")) &&
+            !getenv("LARECOMP_AUTO_DX12") && !getenv("LARECOMP_DX12") &&
+            !getenv("VK_DRIVER_FILES") && !getenv("VK_ICD_FILENAMES") &&
+            rt_resource("dx12/dzn_icd.x86_64.json", NULL, dozen_icd, sizeof dozen_icd)) {
+            LOG("[vk] AMD Vulkan could not create the initial window (%d): trying DirectX 12 once\n", sr);
+            launcher_log_file("[vk] AMD Vulkan could not create the initial window (%d): trying DirectX 12 once\n", sr);
+            g_settings.dx12 = true;
+            settings_save();
+            _putenv_s("LARECOMP_AUTO_DX12", "1");
+            if (plat_relaunch()) exit(0);
+            g_settings.dx12 = false;
+            settings_save();
+            LOG("[vk] could not restart for the DirectX 12 fallback\n");
+        }
         if (sr == VK_SUCCESS && g_vk.dozen && ENV("LARECOMP_TEST_DX12_SWAPCHAIN_FAIL"))
             vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL), g_vk.swapchain = VK_NULL_HANDLE, sr = VK_ERROR_OUT_OF_HOST_MEMORY;
         // DirectX 12 (Dozen) with no window to draw in: start again on Vulkan, as when its device can't start (#159)

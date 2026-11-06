@@ -56,6 +56,10 @@ bool mic_noise_process(MicNoise *m, int16_t *samples, size_t count) {
                 if (probability > speech) speech = probability;
             }
             float level = (float)sqrt(m->frame_energy / (NOISE_FRAME * m->channels));
+            double filtered_energy = 0;
+            for (unsigned c = 0; c < m->channels; c++)
+                for (unsigned i = 0; i < NOISE_FRAME; i++) filtered_energy += m->output[c][i] * m->output[c][i];
+            float filtered_level = (float)sqrt(filtered_energy / (NOISE_FRAME * m->channels));
             m->frame_energy = 0;
             m->level_smooth += 0.1f * (level - m->level_smooth);
             // Strong mode fades down residual noise between speech, with a hold
@@ -64,10 +68,18 @@ bool mic_noise_process(MicNoise *m, int16_t *samples, size_t count) {
                 // The voice detector can mistake steady hiss for speech after
                 // several seconds. Track the ambient level and require speech
                 // to rise above it as well as passing the detector.
-                if (speech < 0.5f || m->level_smooth < m->noise_floor * 2.0f)
+                // A high VAD probability can persist on steady noise. When the
+                // denoiser removes almost all the input, keep learning that
+                // background even if it incorrectly holds the gate open.
+                bool mostly_noise = level > 30.0f && filtered_level < level * 0.12f;
+                if (mostly_noise || (!m->speech_hold && (speech < 0.5f || m->level_smooth < m->noise_floor * 2.0f)))
                     m->noise_floor += 0.01f * (m->level_smooth - m->noise_floor);
-                if (speech >= 0.75f && m->level_smooth > m->noise_floor * 2.2f && m->level_smooth > 30.0f) {
-                    m->speech_hold = 25;
+                bool start = speech >= 0.75f && m->level_smooth > m->noise_floor * 2.2f && m->level_smooth > 30.0f;
+                // Once speech has opened the gate, tolerate quieter syllables and
+                // short drops in voice probability without retraining the floor.
+                bool continuing = m->speech_hold && speech >= 0.35f && m->level_smooth > m->noise_floor * 1.35f;
+                if (start || continuing) {
+                    m->speech_hold = 50;
                 }
                 else if (m->speech_hold) m->speech_hold--;
                 float target = m->speech_hold ? 1.0f : 0.0f;

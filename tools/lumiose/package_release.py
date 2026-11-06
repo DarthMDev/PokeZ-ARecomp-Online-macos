@@ -40,10 +40,13 @@ def main():
     copy_file(ROOT / 'third_party/fonts/DejaVu/LICENSE', out / 'DejaVu-LICENSE.txt')
     copy_file(ROOT / 'third_party/rnnoise/COPYING', out / 'RNNOISE-LICENSE.txt')
     copy_file(ROOT / 'assets/lumiose_icon.png', out / 'icon.png')
-    for n in ('zig', 'lasgen', 'zaimport', 'zaprompts'):
+    for n in ('zig', 'lasgen', 'zaimport', 'zaprompts', 'dx12', 'D3D12'):
         src = a.support / n
         if not src.is_dir(): raise RuntimeError(f'Required support folder missing: {src}')
         shutil.copytree(src, out / n)
+    for n in ('dx12/dzn_icd.x86_64.json', 'dx12/vulkan_dzn.dll', 'dx12/Mesa-LICENSE.rst',
+              'dx12/D3D12-Agility-LICENSE.txt', 'D3D12/D3D12Core.dll'):
+        if not (out / n).is_file(): raise RuntimeError(f'Required DirectX support file missing: {n}')
     for n in ('cpu.h', 'simd.h', 'simd_fp.h', 'gamelib.h'):
         copy_file(ROOT / 'runtime' / n, out / 'gamelib-src' / n)
     copy_file(ROOT / 'tools/gamelib_entry.c', out / 'gamelib-src/gamelib_entry.c')

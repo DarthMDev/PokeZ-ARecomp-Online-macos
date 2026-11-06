@@ -17,6 +17,7 @@
 #include "imgui_internal.h"  // (NavCursorVisible)
 #include "osk.h"
 #include "pad_nav.h"
+#include "lumiose_chat_layout.h"
 #ifdef __APPLE__
 #include "imgui_impl_metal.h"
 #else
@@ -34,6 +35,7 @@ extern "C" {
 #include "../hle.h"
 #include "../settings.h"
 extern int g_game_is_la;  // runtime/kernel.c: Link's Awakening (its own tabs: randomizer, warp, cheats...)
+extern const char *g_save_dir;
 #include "menu.h"
 void input_reset(void);
 void save_editor_draw(float scale);  // save_editor.mm
@@ -1191,7 +1193,14 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
     if (g_kbd_chat.load()) {
         // The mod lays out its chat at the lower left of a 1920x1080 HUD.
         // Draw only the editable text field over the mod's existing input row.
-        float hud = io.DisplaySize.y / 1080.0f;
+        static LumioseChatScale chat_scale = {1.0f, 1.0f};
+        static Uint64 last_scale_read = 0;
+        Uint64 now = SDL_GetTicks();
+        if (!last_scale_read || now - last_scale_read >= 250) {
+            chat_scale = lumiose_chat_scale_read(g_save_dir);
+            last_scale_read = now;
+        }
+        float hud = io.DisplaySize.y / 1080.0f * chat_scale.ui;
         float top = io.DisplaySize.y - 46 * hud;
         g_chat_send_left = 394 * hud; g_chat_send_right = 462 * hud;
         g_chat_send_top = top; g_chat_send_bottom = top + 32 * hud;
@@ -1208,7 +1217,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
         ImGui::Begin("##lumiose-chat-input", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
         if (g_chat_font) ImGui::PushFont(g_chat_font);
-        else ImGui::SetWindowFontScale(16.0f / 34.0f);
+        ImGui::SetWindowFontScale(chat_scale.ui * chat_scale.text * (g_chat_font ? 1.0f : 16.0f / 34.0f));
         static unsigned focused_sequence;
         unsigned sequence = g_kbd_sequence.load();
         if (focused_sequence != sequence) { ImGui::SetKeyboardFocusHere(); focused_sequence = sequence; }
@@ -1219,7 +1228,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
                          [](ImGuiInputTextCallbackData *d) -> int { return d->EventChar < 0x20 ? 1 : 0; });
         kbd_cut(g_kbd_text, g_kbd_max);
         if (g_chat_font) ImGui::PopFont();
-        else ImGui::SetWindowFontScale(1.0f);
+        ImGui::SetWindowFontScale(1.0f);
         ImGui::End();
         ImGui::PopStyleColor(4);
         ImGui::PopStyleVar(4);
