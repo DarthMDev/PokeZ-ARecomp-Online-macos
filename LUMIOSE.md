@@ -10,10 +10,11 @@ launcher executable during its build.
 
 ## Windows integration from a source checkout
 
-The Lumiose integration is currently an experimental Windows workflow; it is
-not yet a self-contained public release installer. Build the launcher with the
-Windows instructions, and use ZA Recomp's normal setup to make `extracted/`
-and its game library from your own game files. The game must be version 2.0.2.
+For the packaged Windows release, see `LUMIOSE-RELEASE.md` for first-run
+instructions. To build or work on the integration from a source checkout,
+build the launcher with the Windows instructions, and use ZA Recomp's normal
+setup to make `extracted/` and its game library from your own game files. The
+game must be version 2.0.2.
 The integration scripts require Python with `unicorn`, `capstone` and `lz4`,
 the built `build/lasrecomp.dll.a`, and ZA Recomp's Zig distribution.
 

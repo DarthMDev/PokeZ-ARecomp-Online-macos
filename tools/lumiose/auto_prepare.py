@@ -92,7 +92,8 @@ def capture(exe, game, work, module, library, gamelib, build_id, *, snapshot, se
                LUMIOSE_TEST_MODULE=str(module), LUMIOSE_TEST_LIBRARY=str(library),
                LARECOMP_GAME_LIB=str(gamelib), LUMIOSE_TEST_OFFLINE_CAPTURE='1',
                LUMIOSE_PREPARE_BUILD_ID=build_id)
-    for key in ('LARECOMP_INPUT', 'LUMIOSE_TEST_NETWORK', 'LUMIOSE_TEST_DROP_FILE', 'LARECOMP_REBOOT_AT'):
+    for key in ('LARECOMP_INPUT', 'LUMIOSE_TEST_NETWORK', 'LUMIOSE_TEST_DROP_FILE', 'LARECOMP_REBOOT_AT',
+                'LARECOMP_LAUNCHER_SETUP', 'LARECOMP_LAUNCHER_EXTRACT', 'LARECOMP_LAUNCHER_SHOT', 'LUMIOSE_FIRST_SETUP'):
         env.pop(key, None)
     if snapshot:
         env['LUMIOSE_TEST_DUMP'] = str(work)
