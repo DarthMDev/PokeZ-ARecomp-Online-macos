@@ -14,7 +14,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: Lumiose-Online-linux-experimental
-          run-id: 42282799940
+          run-id: 42286656288
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Unpack and check packaged dependencies
         run: |
@@ -37,3 +37,15 @@ jobs:
           LARECOMP_LAUNCHER_SHOT=150 LARECOMP_SHOT_PATH="$RUNNER_TEMP/launcher.png" \
             timeout --kill-after=5s 90 xvfb-run -a "$D/lasrecomp" || { cat "$RUNNER_TEMP/launcher-data/lasrecomp.log" || true; exit 1; }
           test -s "$RUNNER_TEMP/launcher.png"
+      - name: Show the Linux launcher update confirmation
+        run: |
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          LARECOMP_DATA_ROOT="$RUNNER_TEMP/launcher-data" LARECOMP_UPDATE_TAGS=v99.0.0 \
+          LARECOMP_UPDATE_ZIP="$RUNNER_TEMP/update.zip" LARECOMP_LAUNCHER_SHOT=150:askupdate \
+          LARECOMP_SHOT_PATH="$RUNNER_TEMP/update.png" timeout --kill-after=5s 90 xvfb-run -a "$D/lasrecomp"
+          test -s "$RUNNER_TEMP/update.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-update-confirmation
+          path: ${{ runner.temp }}/update.png
+          if-no-files-found: error
