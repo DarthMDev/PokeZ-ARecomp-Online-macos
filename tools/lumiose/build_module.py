@@ -4,12 +4,13 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+from platform_paths import WINDOWS, ZIG
 
 root = Path(__file__).resolve().parents[2]
 probe = root / 'tools' / 'lumiose'
 source = root
 zigroot = Path(os.environ['LUMIOSE_ZIG_DIR'])
-zig = str(zigroot / 'zig.exe')
+zig = str(zigroot / ZIG)
 env = os.environ.copy()
 env['ZIG_LIB_DIR'] = str(zigroot / 'lib')
 cache_dir = Path(os.environ['LUMIOSE_SCRATCH']) / 'zig-cache'
@@ -25,6 +26,7 @@ def compile_one(src):
     out = objdir / (src.stem + '.o')
     args = [zig, 'cc', '-O0', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing', '-Wno-return-type', '-Wno-unused-label', '-DLUMIOSE_TEST_CODE',
             '-I', str(source / 'runtime'), '-c', str(src), '-o', str(out)]
+    if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
     result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f'{src.name}: {result.stderr}')
@@ -34,9 +36,12 @@ with ThreadPoolExecutor(max_workers=6) as pool:
     objects = list(pool.map(compile_one, files))
 print(f'Compiled {len(objects)} objects', flush=True)
 output = Path(os.environ.get('LUMIOSE_LIBRARY_OUTPUT', probe / 'lumiose-test.dll'))
-cmd = [zig, 'lld-link', '@' + str(zigroot / 'rt' / 'link.rsp'),
-       '-LIBPATH:' + str(zigroot / 'rt'), '-OUT:' + str(output),
-       *map(str, objects), str(source / 'build' / 'lasrecomp.dll.a')]
+if WINDOWS:
+    cmd = [zig, 'lld-link', '@' + str(zigroot / 'rt' / 'link.rsp'),
+           '-LIBPATH:' + str(zigroot / 'rt'), '-OUT:' + str(output),
+           *map(str, objects), str(source / 'build' / 'lasrecomp.dll.a')]
+else:
+    cmd = [zig, 'cc', '-target', 'x86_64-linux-gnu', '-shared', '-o', str(output), *map(str, objects)]
 result = subprocess.run(cmd, env=env, capture_output=True, text=True)
 print(result.stderr)
 sys.exit(result.returncode)

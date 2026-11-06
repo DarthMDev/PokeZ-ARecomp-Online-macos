@@ -5,13 +5,14 @@ import hashlib
 import os
 import subprocess
 import sys
+from platform_paths import WINDOWS, ZIG
 
 root = Path(__file__).resolve().parents[2]
 scratch = Path(os.environ['LUMIOSE_SCRATCH'])
 source = root
 cache = Path(os.environ['LUMIOSE_GAME_CACHE'])
 zigroot = Path(os.environ['LUMIOSE_ZIG_DIR'])
-zig = str(zigroot / 'zig.exe')
+zig = str(zigroot / ZIG)
 env = os.environ.copy()
 env['ZIG_LIB_DIR'] = str(zigroot / 'lib')
 env['ZIG_GLOBAL_CACHE_DIR'] = str(scratch / 'zig-cache')
@@ -35,6 +36,7 @@ def prepare(src):
     args = [zig, 'cc', '-O1', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing', '-Wno-return-type',
             '-Wno-unused-label', '-fvisibility=hidden', '-mcpu=x86_64_v3', '-I', str(source / 'runtime'),
             '-c', str(src), '-o', str(out)]
+    if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
     result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f'{src.name}: {result.stderr[-4000:]}')
@@ -57,14 +59,19 @@ if not game_id or any(c not in '0123456789abcdefABCDEF-v' for c in game_id):
 args = [zig, 'cc', '-O1', '-g0', '-fno-sanitize=all', '-fno-strict-aliasing',
         '-fvisibility=hidden', '-mcpu=x86_64_v3', '-DGAMELIB_ID="' + game_id + '"',
         '-I', str(source / 'runtime'), '-c', str(source / 'tools' / 'gamelib_entry.c'), '-o', str(entry_obj)]
+if not WINDOWS: args[2:2] = ['-fPIC', '-target', 'x86_64-linux-gnu']
 result = subprocess.run(args, env=env, capture_output=True, text=True)
 if result.returncode:
     raise RuntimeError(f'gamelib_entry.c: {result.stderr[-4000:]}')
 objects.append(entry_obj)
 rsp = scratch / 'patched-objects.rsp'
 rsp.write_text(''.join('"' + str(p).replace('\\', '/') + '"\n' for p in objects))
-cmd = [zig, 'lld-link', '@' + str(zigroot / 'rt' / 'link.rsp'), '-LIBPATH:' + str(zigroot / 'rt'),
-       '-OUT:' + os.environ.get('LUMIOSE_GAME_OUTPUT', str(scratch / 'patched-lasgame.dll')), '@' + str(rsp), str(source / 'build' / 'lasrecomp.dll.a')]
+output = os.environ.get('LUMIOSE_GAME_OUTPUT', str(scratch / ('patched-lasgame.dll' if WINDOWS else 'patched-lasgame.so')))
+if WINDOWS:
+    cmd = [zig, 'lld-link', '@' + str(zigroot / 'rt' / 'link.rsp'), '-LIBPATH:' + str(zigroot / 'rt'),
+           '-OUT:' + output, '@' + str(rsp), str(source / 'build' / 'lasrecomp.dll.a')]
+else:
+    cmd = [zig, 'cc', '-target', 'x86_64-linux-gnu', '-shared', '-o', output, '@' + str(rsp)]
 result = subprocess.run(cmd, env=env, capture_output=True, text=True)
 print(f'Link exit {result.returncode}; reused {reused}, rebuilt {compiled}', flush=True)
 if result.stderr:

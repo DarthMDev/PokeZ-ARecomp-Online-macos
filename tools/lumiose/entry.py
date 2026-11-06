@@ -3,11 +3,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import msvcrt
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools' / 'lumiose'))
 from auto_launch import launch
+from platform_paths import EXECUTABLE, GAME_LIBRARY, lock_file
 
 
 def main():
@@ -27,8 +27,8 @@ def main():
             env.pop(key, None)
         if os.environ.get('LUMIOSE_RELEASE_TEST_PREPARE_ONLY') != '1':
             env.pop('LARECOMP_HIDDEN', None)
-        result = subprocess.run([str(ROOT / 'lasrecomp.exe'), str(ROOT / 'extracted')], cwd=ROOT, env=env)
-        if result.returncode or not (ROOT / 'extracted/lasgame.dll.id').is_file():
+        result = subprocess.run([str(ROOT / EXECUTABLE), str(ROOT / 'extracted')], cwd=ROOT, env=env)
+        if result.returncode or not (ROOT / 'extracted' / (GAME_LIBRARY + '.id')).is_file():
             raise RuntimeError('Game setup was not completed. Start Lumiose Online again when you are ready.')
         cmd = [sys.executable, str(ROOT / 'tools/lumiose/setup.py'), '--install', str(ROOT),
                '--zig', str(ROOT / 'zig'), '--server', '135.148.167.226:27777']
@@ -40,7 +40,7 @@ def main():
     import json
     cfg = json.loads(config.read_text(encoding='utf-8'))
     cfg.update(install=str(ROOT), reference=str(ROOT / 'lumiose/subsdk9'),
-               vanilla=str(ROOT / 'extracted/lasgame.dll'), zig=str(ROOT / 'zig'),
+               vanilla=str(ROOT / 'extracted' / GAME_LIBRARY), zig=str(ROOT / 'zig'),
                cache=str(ROOT / 'extracted/.gamebuild'))
     config.write_text(json.dumps(cfg, indent=2) + '\n', encoding='utf-8')
     launch(config, prepare_only=os.environ.get('LUMIOSE_RELEASE_TEST_PREPARE_ONLY') == '1')
@@ -50,10 +50,7 @@ if __name__ == '__main__':
     try:
         lock_path = ROOT / 'lumiose' / 'update.lock'
         with lock_path.open('a+b') as lock:
-            lock.seek(0)
-            if not lock.read(1): lock.write(b'0'); lock.flush()
-            lock.seek(0)
-            try: msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            try: lock_file(lock)
             except OSError: raise RuntimeError('Another Lumiose launcher is already preparing an update')
             main()
     except Exception as e:

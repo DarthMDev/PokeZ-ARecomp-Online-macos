@@ -17,16 +17,16 @@ class UpdateTests(unittest.TestCase):
         self.install = self.root / 'install'
         self.mod = self.install / 'lumiose'
         self.mod.mkdir(parents=True)
-        for name in ('subsdk9', 'lumiose.dll', 'lasgame.dll'):
+        for name in ('subsdk9', launcher.MODULE_LIBRARY, launcher.GAME_LIBRARY):
             (self.mod / name).write_bytes(('old ' + name).encode())
-        (self.mod / 'lasgame.dll.id').write_text('game-id')
+        (self.mod / (launcher.GAME_LIBRARY + '.id')).write_text('game-id')
         self.download = self.install / 'save/sdcard/atmosphere/contents/0100F43008C44000/exefs/subsdk9'
         self.download.parent.mkdir(parents=True)
         self.download.write_bytes(b'old download')
         self.state = self.mod / 'update-state.json'
         self.initial = {'build_id': 'a' * 40, 'version': [1, 3, 9, 1], 'download_hash': launcher.digest(self.download),
                         'active_hashes': {n: launcher.digest(self.mod / n)
-                                          for n in ('subsdk9', 'lumiose.dll', 'lasgame.dll')}}
+                                          for n in ('subsdk9', launcher.MODULE_LIBRARY, launcher.GAME_LIBRARY)}}
         launcher.write_state(self.state, self.initial)
         self.config = self.root / 'config.json'
         self.config.write_text(json.dumps({'install': str(self.install), 'reference': 'ref', 'vanilla': 'vanilla',
@@ -76,8 +76,8 @@ class UpdateTests(unittest.TestCase):
             staged = work / 'input/exefs/subsdk9'
             staged.parent.mkdir(parents=True)
             staged.write_bytes(self.download.read_bytes())
-            (work / 'lumiose.dll').write_bytes(b'new module')
-            (work / 'lasgame.dll').write_bytes(b'new game code')
+            (work / launcher.MODULE_LIBRARY).write_bytes(b'new module')
+            (work / launcher.GAME_LIBRARY).write_bytes(b'new game code')
             (work / 'prepared.json').write_text(json.dumps({'build_id': 'b' * 40, 'version': [1, 3, 10, 0]}))
             return type('Result', (), {'returncode': 0})()
         with patch.object(launcher.subprocess, 'run', side_effect=prepare), patch.object(launcher.subprocess, 'Popen') as launch:
@@ -86,7 +86,7 @@ class UpdateTests(unittest.TestCase):
             state = json.loads(self.state.read_text())
             self.assertEqual(state['download_hash'], launcher.digest(self.download))
             self.assertEqual(state['build_id'], 'b' * 40)
-            self.assertTrue((self.mod / 'versions' / state['version_dir'] / 'lasgame.dll').is_file())
+            self.assertTrue((self.mod / 'versions' / state['version_dir'] / launcher.GAME_LIBRARY).is_file())
 
     def test_installed_1311_is_refreshed_once(self):
         build = 'c754ba10deedfed696a55010c8dd9131c508a647'
@@ -96,8 +96,8 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(Path(cmd[cmd.index('--candidate') + 1]), self.mod / 'subsdk9')
             work = Path(cmd[cmd.index('--work') + 1]); staged = work / 'input/exefs/subsdk9'
             staged.parent.mkdir(parents=True); staged.write_bytes((self.mod / 'subsdk9').read_bytes())
-            (work / 'lumiose.dll').write_bytes(b'corrected module')
-            (work / 'lasgame.dll').write_bytes(b'matching game code')
+            (work / launcher.MODULE_LIBRARY).write_bytes(b'corrected module')
+            (work / launcher.GAME_LIBRARY).write_bytes(b'matching game code')
             (work / 'prepared.json').write_text(json.dumps({'build_id': build, 'version': [1, 3, 11, 0]}))
             return type('Result', (), {'returncode': 0})()
         with patch.object(launcher.subprocess, 'run', side_effect=prepare) as run, patch.object(launcher.subprocess, 'Popen'):

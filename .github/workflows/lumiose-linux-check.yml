@@ -1,0 +1,19 @@
+name: Lumiose Linux compatibility checks
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/test-venv"
+          "$RUNNER_TEMP/test-venv/bin/pip" install capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5
+      - name: Check native runtime and updater
+        run: |
+          clang -std=gnu11 -fsyntax-only -Iruntime runtime/dispatch.c runtime/hle/lumiose_network.c
+          "$RUNNER_TEMP/test-venv/bin/python" -m compileall -q tools/lumiose
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" -m unittest discover -s tools/lumiose -p 'test_*.py'

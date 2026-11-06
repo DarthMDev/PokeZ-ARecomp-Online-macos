@@ -1,7 +1,17 @@
-// Experimental Windows UDP bridge for the explicitly enabled Lumiose test.
+// UDP bridge for the explicitly enabled Lumiose integration.
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+typedef int SOCKET;
+#define INVALID_SOCKET (-1)
+#define closesocket close
+#define ioctlsocket ioctl
+#endif
 #include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -18,8 +28,10 @@ void lumiose_mark_trainer_ready(void) { atomic_store(&trainer_name_ready, true);
 
 static bool net_start(void) {
     if (!started) {
+#ifdef _WIN32
         WSADATA data;
         if (WSAStartup(MAKEWORD(2, 2), &data)) return false;
+#endif
         for (int i = 0; i < LUMIOSE_MAX_SOCKETS; i++) sockets[i] = INVALID_SOCKET;
         started = 1;
     }
@@ -32,7 +44,9 @@ RT_ON_RESET(lumiose_net_reset) {
     if (started) {
         for (int i = 0; i < LUMIOSE_MAX_SOCKETS; i++)
             if (sockets[i] != INVALID_SOCKET) closesocket(sockets[i]);
+#ifdef _WIN32
         WSACleanup();
+#endif
         started = 0;
     }
     pthread_mutex_unlock(&lock);
@@ -148,7 +162,11 @@ HLE_FUNC("_ZN2nn6socket8RecvFromEiPvmNS0_7MsgFlagEPNS0_8SockAddrEPj", lumiose_so
     static int received;
     if (getenv("LUMIOSE_TEST_OFFLINE_CAPTURE")) { c->x[0] = (uint32_t)-1; return; }
     struct sockaddr_in address;
+#ifdef _WIN32
     int size = sizeof address;
+#else
+    socklen_t size = sizeof address;
+#endif
     if (c->x[2] <= INT_MAX) {
         pthread_mutex_lock(&lock);
         if (started && fd >= 0 && fd < LUMIOSE_MAX_SOCKETS && sockets[fd] != INVALID_SOCKET)
@@ -167,4 +185,3 @@ HLE_FUNC("_ZN2nn6socket8RecvFromEiPvmNS0_7MsgFlagEPNS0_8SockAddrEPj", lumiose_so
     if (result >= 0 && received++ < 10) LOG("[lumiose net] received %d bytes\n", result);
     c->x[0] = (uint32_t)result;
 }
-#endif

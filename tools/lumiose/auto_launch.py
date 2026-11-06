@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import msvcrt
+from platform_paths import EXECUTABLE, GAME_LIBRARY, MODULE_LIBRARY, lock_file
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,7 +40,7 @@ def launch(config_path, prepare_only=False):
     if not state_path.is_file():
         raise RuntimeError('Update setup is incomplete; no mod was started')
     state = json.loads(state_path.read_text(encoding='utf-8'))
-    id_file = mod_dir / 'lasgame.dll.id'
+    id_file = mod_dir / (GAME_LIBRARY + '.id')
     if not id_file.is_file():
         raise RuntimeError('The game-code identification file is missing')
     baseline = state.get('download_hash')
@@ -75,7 +75,7 @@ def launch(config_path, prepare_only=False):
         work = Path(tempfile.mkdtemp(prefix='prepare-', dir=work_root))
         cmd = [sys.executable, str(ROOT / 'tools' / 'lumiose' / 'auto_prepare.py'),
                '--candidate', str(candidate), '--reference', cfg['reference'],
-               '--game', str(game), '--vanilla', cfg['vanilla'], '--exe', str(install / 'lasrecomp.exe'),
+               '--game', str(game), '--vanilla', cfg['vanilla'], '--exe', str(install / EXECUTABLE),
                '--zig', cfg['zig'], '--cache', cfg['cache'], '--work', str(work)]
         if subprocess.run(cmd, cwd=ROOT).returncode:
             raise RuntimeError(f'The update could not be prepared. Details are in {work}')
@@ -100,8 +100,8 @@ def launch(config_path, prepare_only=False):
         name = build_id + '-' + current_hash[:16] + ('-switch1' if refresh else '')
         target = versions / name
         files = ((work / 'input' / 'exefs' / 'subsdk9', 'subsdk9'),
-                 (work / 'lumiose.dll', 'lumiose.dll'), (work / 'lasgame.dll', 'lasgame.dll'),
-                 (id_file, 'lasgame.dll.id'))
+                 (work / MODULE_LIBRARY, MODULE_LIBRARY), (work / GAME_LIBRARY, GAME_LIBRARY),
+                 (id_file, GAME_LIBRARY + '.id'))
         if target.exists():
             if any(digest(src) != digest(target / dst) for src, dst in files):
                 raise RuntimeError('A different prepared version already exists; update was not activated')
@@ -126,19 +126,19 @@ def launch(config_path, prepare_only=False):
         active = mod_dir / 'versions' / version
     else:
         active = mod_dir
-    if active != mod_dir and not (active / 'lasgame.dll.id').is_file():
+    if active != mod_dir and not (active / (GAME_LIBRARY + '.id')).is_file():
         # Repair versions produced by the earlier updater, which omitted this
         # launcher-side identification file even though the library was valid.
-        shutil.copy2(id_file, active / 'lasgame.dll.id')
-    if digest(active / 'lasgame.dll.id') != digest(id_file):
+        shutil.copy2(id_file, active / (GAME_LIBRARY + '.id'))
+    if digest(active / (GAME_LIBRARY + '.id')) != digest(id_file):
         raise RuntimeError('The active game-code identification does not match')
-    for name in ('subsdk9', 'lumiose.dll', 'lasgame.dll'):
+    for name in ('subsdk9', MODULE_LIBRARY, GAME_LIBRARY):
         if not (active / name).is_file(): raise RuntimeError(f'The active mod is missing {name}')
         if state.get('active_hashes', {}).get(name) != digest(active / name):
             raise RuntimeError(f'The active mod file {name} failed verification')
     env = os.environ.copy()
-    env.update(LARECOMP_DATA_ROOT=str(install), LARECOMP_GAME_LIB=str(active / 'lasgame.dll'),
-               LUMIOSE_TEST_MODULE=str(active / 'subsdk9'), LUMIOSE_TEST_LIBRARY=str(active / 'lumiose.dll'),
+    env.update(LARECOMP_DATA_ROOT=str(install), LARECOMP_GAME_LIB=str(active / GAME_LIBRARY),
+               LUMIOSE_TEST_MODULE=str(active / 'subsdk9'), LUMIOSE_TEST_LIBRARY=str(active / MODULE_LIBRARY),
                LUMIOSE_TEST_NETWORK='1', LUMIOSE_TEST_SERVER=cfg['server'],
                LARECOMP_DISABLE_OCCLUSION_CULLING='1',
                LUMIOSE_PREPARE_BUILD_ID=state['build_id'])
@@ -146,7 +146,7 @@ def launch(config_path, prepare_only=False):
                 'LUMIOSE_TEST_DUMP', 'LUMIOSE_TEST_DROP_FILE'):
         env.pop(key, None)
     if not prepare_only:
-        subprocess.Popen([str(install / 'lasrecomp.exe'), str(game)], cwd=str(install), env=env,
+        subprocess.Popen([str(install / EXECUTABLE), str(game)], cwd=str(install), env=env,
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
@@ -158,10 +158,7 @@ if __name__ == '__main__':
         cfg = json.loads(config_path.read_text(encoding='utf-8'))
         lock_path = Path(cfg['install']) / 'lumiose' / 'update.lock'
         with lock_path.open('a+b') as lock:
-            lock.seek(0)
-            if not lock.read(1): lock.write(b'0'); lock.flush()
-            lock.seek(0)
-            try: msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            try: lock_file(lock)
             except OSError: raise RuntimeError('Another Lumiose launcher is already preparing an update')
             launch(config_path, prepare_only=len(sys.argv) == 3)
     except Exception as e:

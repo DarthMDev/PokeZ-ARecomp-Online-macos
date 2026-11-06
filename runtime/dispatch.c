@@ -6,6 +6,8 @@
 #include <unistd.h>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 #include "gamelib.h"
@@ -132,23 +134,25 @@ void dispatch_init(void) {  // (after gamelib_load)
     tables[1] = (FnTable){g->sdk_addrs, g->sdk_fns, ns, g->sdk_addrs[0], g->sdk_addrs[ns - 1]};
     memset(&tables[2], 0, sizeof tables[2]);
     if (g_nmodules > 2) {
-#ifdef _WIN32
         typedef struct { const uint64_t *addrs; const GuestFn *fns; uint64_t count; } ExtraTable;
         typedef const ExtraTable *(*ExtraEntry)(void);
         const char *path = getenv("LUMIOSE_TEST_LIBRARY");
         if (!path || !*path) FATAL("Lumiose test library path not supplied\n");
+#ifdef _WIN32
         HMODULE lib = LoadLibraryA(path);
         if (!lib) FATAL("Lumiose test library could not load (Windows error %lu)\n", GetLastError());
         ExtraEntry entry = (ExtraEntry)(void *)GetProcAddress(lib, "lumiose_test_table");
+#else
+        void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+        if (!lib) FATAL("Lumiose test library could not load: %s\n", dlerror());
+        ExtraEntry entry = (ExtraEntry)dlsym(lib, "lumiose_test_table");
+#endif
         const ExtraTable *x = entry ? entry() : NULL;
         if (!x || !x->addrs || !x->fns || !x->count || x->addrs[0] < g_modules[2].base ||
             x->addrs[x->count - 1] >= g_modules[2].base + g_modules[2].text_size)
             FATAL("Lumiose test library has an invalid function table\n");
         tables[2] = (FnTable){x->addrs, x->fns, x->count, x->addrs[0], x->addrs[x->count - 1]};
         LOG("[lumiose test] loaded %llu translated functions\n", (unsigned long long)x->count);
-#else
-        FATAL("Lumiose test is only configured for Windows\n");
-#endif
     }
 }
 
