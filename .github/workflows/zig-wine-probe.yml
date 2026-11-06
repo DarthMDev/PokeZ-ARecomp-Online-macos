@@ -1,0 +1,51 @@
+name: Temporary Zig Wine compatibility probe
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install Wine
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends wine64
+      - name: Download official Zig releases and verify checksums
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request, zipfile
+          index = json.load(urllib.request.urlopen('https://ziglang.org/download/index.json'))
+          for version in ('0.17.0', '0.15.2'):
+              info = index[version]['x86_64-windows']
+              data = urllib.request.urlopen(info['tarball']).read()
+              assert hashlib.sha256(data).hexdigest() == info['shasum'], version
+              file = pathlib.Path(f'{version}.zip')
+              file.write_bytes(data)
+              with zipfile.ZipFile(file) as z: z.extractall(version)
+          PY
+      - name: Probe compiler with Wine
+        env:
+          WINEDEBUG: '-all'
+          WINEPREFIX: '${{ runner.temp }}/zig-wine-prefix'
+        run: |
+          set -u
+          export PATH="/usr/lib/wine:$PATH"
+          WINE=$(command -v wine64 || command -v wine)
+          echo "Wine path: $WINE"
+          "$WINE" --version || true
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/local-cache" "$RUNNER_TEMP/card-cache"
+          printf 'int storage_probe(void) { return 42; }\n' > "$RUNNER_TEMP/source/probe.c"
+          for version in 0.17.0 0.15.2; do
+            ZIG=$(find "$PWD/$version" -name zig.exe -type f -print -quit)
+            echo "=== Zig $version ==="
+            for cache in local-cache card-cache; do
+              echo "--- $cache ---"
+              cache_path="Z:${RUNNER_TEMP//\//\\}\\$cache"
+              source_path="Z:${RUNNER_TEMP//\//\\}\\source\\probe.c"
+              output_path="Z:${RUNNER_TEMP//\//\\}\\source\\$version-$cache.o"
+              ZIG_GLOBAL_CACHE_DIR="$cache_path" ZIG_LOCAL_CACHE_DIR="$cache_path" \
+                timeout 120 "$WINE" "$ZIG" cc -c "$source_path" -o "$output_path"; result=$?
+              echo "RESULT version=$version cache=$cache exit=$result"
+            done
+          done
