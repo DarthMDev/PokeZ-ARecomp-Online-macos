@@ -119,6 +119,80 @@ static int nregions;
 // under a concurrent one lost regions; a QueryMemory during it read a wrong answer). Its own lock, not g_klock: a
 // shared memory's on_map callback may take that one.
 static pthread_mutex_t g_mlock = PTHREAD_MUTEX_INITIALIZER;
+typedef struct { uint64_t key, addr, size; } LumioseGpuPool;
+static LumioseGpuPool lumiose_gpu_pools[256];
+void kernel_gpu_pool_add(uint64_t key, uint64_t addr, uint64_t size) {
+    if (size < 0x100000 || !addr || addr + size < addr) return;
+    pthread_mutex_lock(&g_mlock);
+    for (size_t i = 0; i < sizeof lumiose_gpu_pools / sizeof *lumiose_gpu_pools; i++)
+        if (!lumiose_gpu_pools[i].key || lumiose_gpu_pools[i].key == key) {
+            lumiose_gpu_pools[i] = (LumioseGpuPool){key, addr, size}; break;
+        }
+    pthread_mutex_unlock(&g_mlock);
+}
+void kernel_gpu_pool_remove(uint64_t key) {
+    pthread_mutex_lock(&g_mlock);
+    for (size_t i = 0; i < sizeof lumiose_gpu_pools / sizeof *lumiose_gpu_pools; i++)
+        if (lumiose_gpu_pools[i].key == key) lumiose_gpu_pools[i] = (LumioseGpuPool){0};
+    pthread_mutex_unlock(&g_mlock);
+}
+int lumiose_test_initializing;
+typedef struct { uint64_t dst, src, size; } LumioseAlias;
+static LumioseAlias lumiose_aliases[64];
+static unsigned lumiose_alias_count;
+
+static void lumiose_mirror(uint64_t original, const void *value, unsigned size) {
+    memcpy((void *)(uintptr_t)original, value, size);
+    for (unsigned j = 0; j < lumiose_alias_count; j++) {
+        LumioseAlias *other = &lumiose_aliases[j];
+        if (original >= other->src && original - other->src < other->size &&
+            size <= other->size - (original - other->src))
+            memcpy((void *)(uintptr_t)(other->dst + original - other->src), value, size);
+    }
+}
+
+// The experimental module writes to a private mapping of game code. Mirror those
+// writes into the guest image so the test can inspect the requested patches.
+void lumiose_test_store(uint64_t addr, uint64_t value, unsigned size) {
+    memcpy((void *)(uintptr_t)addr, &value, size);
+    for (unsigned i = 0; i < lumiose_alias_count; i++) {
+        LumioseAlias *a = &lumiose_aliases[i];
+        if (addr >= a->dst && addr - a->dst < a->size && size <= a->size - (addr - a->dst)) {
+            uint64_t original = a->src + (addr - a->dst);
+            lumiose_mirror(original, &value, size);
+            LOG("[lumiose patch] %llx size %u value %llx\n", (unsigned long long)original,
+                size, (unsigned long long)value);
+            break;
+        }
+    }
+}
+
+void lumiose_test_snapshot(void) {
+    for (unsigned i = 0; i < lumiose_alias_count; i++) {
+        LumioseAlias *a = &lumiose_aliases[i];
+        for (uint64_t off = 0; off + 4 <= a->size; off += 4) {
+            uint32_t *src = (uint32_t *)(uintptr_t)(a->src + off);
+            uint32_t *dst = (uint32_t *)(uintptr_t)(a->dst + off);
+            if (*src != *dst) {
+                uint32_t value = *dst;
+                LOG("[lumiose patch] %llx size 4 value %x (snapshot)\n", (unsigned long long)(a->src + off), value);
+                lumiose_mirror(a->src + off, &value, sizeof value);
+            }
+        }
+    }
+    const char *dir = getenv("LUMIOSE_TEST_DUMP");
+    if (!dir || !*dir) return;
+    for (int i = 0; i < 3; i++) {
+        char path[1100];
+        snprintf(path, sizeof path, "%s/%s.image", dir, g_modules[i].name);
+        FILE *f = fopen(path, "wb");
+        if (!f) FATAL("cannot create Lumiose test snapshot\n");
+        if (fwrite((void *)(uintptr_t)g_modules[i].base, 1, g_modules[i].size, f) != g_modules[i].size)
+            FATAL("cannot write Lumiose test snapshot\n");
+        fclose(f);
+    }
+    LOG("[lumiose test] wrote local module snapshots\n");
+}
 static uint64_t heap_size;
 static uint64_t tls_next = TLS_BASE;
 uint64_t kernel_heap_size(void) { return heap_size; }  // bytes from HEAP_BASE set by SetHeapSize
@@ -286,6 +360,15 @@ static void phys_unmap(uint64_t addr, uint64_t size) {
 static void query_memory(uint64_t addr, uint64_t out) {
     uint64_t prev_end = 0;
     uint64_t info[5] = {0};  // addr, size, type|attr<<32, perm|ipc<<32, device|pad<<32
+    if (addr >= (1ull << 39)) {
+        // The address space beyond the 39-bit guest range is one reserved region.
+        // Its end wraps to zero, letting memory-map walkers terminate.
+        info[0] = 1ull << 39;
+        info[1] = 0 - info[0];
+        info[2] = 0x10;
+        memcpy((void *)out, info, 0x28);
+        return;
+    }
     for (int i = 0; i < nregions; i++) {
         Region *r = &regions[i];
         if (addr >= r->addr && addr < r->addr + r->size) {
@@ -307,6 +390,50 @@ static void query_memory(uint64_t addr, uint64_t out) {
     info[0] = prev_end;
     info[1] = (1ull << 39) - prev_end;
     memcpy((void *)out, info, 0x28);
+}
+
+// For Lumiose's camera search, expose real large GPU pool boundaries. The
+// game's physical allocation supplies ordinary CPU-readable memory in this
+// runtime, so report its non-pool portions as heap for this scan only.
+static void lumiose_camera_memory(uint64_t addr, uint64_t out) {
+    uint64_t *info = (uint64_t *)(uintptr_t)out;
+    if ((uint32_t)info[2] != 7 && (uint32_t)info[2] != 5) return;
+    uint64_t lo = info[0], hi = lo + info[1], start = lo, end = hi;
+    bool mapped = false;
+    for (size_t i = 0; i < sizeof lumiose_gpu_pools / sizeof *lumiose_gpu_pools; i++) {
+        LumioseGpuPool *p = &lumiose_gpu_pools[i];
+        if (!p->key || p->addr >= hi || p->addr + p->size <= lo) continue;
+        uint64_t a = p->addr > lo ? p->addr : lo, b = p->addr + p->size < hi ? p->addr + p->size : hi;
+        if (addr >= a && addr < b) {
+            mapped = true;
+            if (a > start) start = a;
+            if (b < end) end = b;
+        } else if (b <= addr && b > start) start = b;
+        else if (a > addr && a < end) end = a;
+    }
+    if (start > addr || end <= addr) return;
+    info[0] = start; info[1] = end - start;
+    info[2] = 5 | (mapped ? (4ull << 32) : 0);
+    info[4] = mapped ? 1 : 0;
+}
+
+// The mod examines this aligned signature one word at a time. Running that
+// loop through translated guest code is too slow for its 20-second watchdog;
+// find the next possible signature with the host C library instead.
+uint64_t lumiose_camera_find(uint64_t start, uint64_t end) {
+    if ((start & 15) || end <= start || end - start < 0xc0) return 0;
+    uint64_t last = end - 0xc0;
+    const unsigned char *p = (const unsigned char *)(uintptr_t)(start + 7);
+    const unsigned char *limit = (const unsigned char *)(uintptr_t)(last + 8);
+    while (p < limit) {
+        p = memchr(p, 0x3d, (size_t)(limit - p));
+        if (!p) return 0;
+        uint64_t a = (uint64_t)(uintptr_t)(p - 7);
+        if (!(a & 15) && *(const uint64_t *)(uintptr_t)a == 0x3dcccccd00000000ull &&
+            *(const uint32_t *)(uintptr_t)(a + 8) == 0x45bb8000u) return a;
+        p++;
+    }
+    return 0;
 }
 
 // ------------------------------------------------------------------ threads
@@ -844,6 +971,26 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
     case 0x06:  // QueryMemory(out_info, _, addr)
         pthread_mutex_lock(&g_mlock);
         query_memory(x[2], x[0]);
+        if (g_nmodules > 2 && pc >= g_modules[2].base && pc < g_modules[2].base + g_modules[2].text_size &&
+            (x[30] == g_modules[2].base + 0x15248 || x[30] == g_modules[2].base + 0x152f0)) {
+            lumiose_camera_memory(x[2], x[0]);
+            if (ENV("LUMIOSE_LOG_CAMERA_MEMORY")) {
+                static int nlog;
+                uint64_t *m = (uint64_t *)(uintptr_t)x[0];
+                if (nlog++ < 40) LOG("[camera map] lr %llx query %llx -> %llx+%llx type/attr %llx\n",
+                    (unsigned long long)x[30], (unsigned long long)x[2], (unsigned long long)m[0],
+                    (unsigned long long)m[1], (unsigned long long)m[2]);
+            }
+        }
+        if (lumiose_test_initializing) {
+            static int logged;
+            if (logged++ < 100) {
+                uint64_t *info = (uint64_t *)x[0];
+                LOG("[lumiose query] %llx -> %llx+%llx type %llx perm %llx\n",
+                    (unsigned long long)x[2], (unsigned long long)info[0], (unsigned long long)info[1],
+                    (unsigned long long)info[2], (unsigned long long)info[3]);
+            }
+        }
         pthread_mutex_unlock(&g_mlock);
         x[0] = R_OK;
         x[1] = 0;
@@ -1040,10 +1187,68 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
         case 23: v = 1; break;  // IsApplication
         case 26: v = 1; break;  // IsSvcPermitted
         case 27: case 28: v = 0; break;  // IoRegionHint, AliasRegionExtraSize (18.0.0+: SDK 19 games ask)
+        case 65001:
+            if (g_nmodules > 2) v = 0xffff8001u;  // experimental current-process handle
+            else r = R_INVALID_ENUM;
+            break;
         default: r = R_INVALID_ENUM; LOG("[kernel] GetInfo unknown id %u/%llu\n", id0, x[3]);
         }
         x[0] = r;
         x[1] = v;
+        break;
+    }
+    case 0x74: {  // MapProcessMemory: experimental copied alias for observing module patches
+        if (g_nmodules <= 2 || x[1] != 0xffff8001u || !x[3] || lumiose_alias_count == 64) {
+            x[0] = R_INVALID_CURRENT_MEMORY;
+            break;
+        }
+        bool source_ok = x[2] >= HLE_BASE && x[2] - HLE_BASE < HLE_SIZE && x[3] <= HLE_SIZE - (x[2] - HLE_BASE);
+        for (int i = 0; i < g_nmodules; i++) {
+            Module *m = &g_modules[i];
+            if (x[2] >= m->base && x[2] - m->base < m->size && x[3] <= m->size - (x[2] - m->base))
+                source_ok = true;
+        }
+        pthread_mutex_lock(&g_mlock);
+        if (!source_ok || x[0] < GUEST_LO || x[0] >= GUEST_HI || x[3] > GUEST_HI - x[0] ||
+            region_taken(x[0], x[3], "Lumiose MapProcessMemory")) {
+            pthread_mutex_unlock(&g_mlock);
+            x[0] = R_INVALID_CURRENT_MEMORY;
+            break;
+        }
+        uint64_t dst = x[0], src = x[2], size = x[3];
+        region_add(dst, size, 0xf, 3);
+        memcpy((void *)(uintptr_t)dst, (void *)(uintptr_t)src, size);
+        lumiose_aliases[lumiose_alias_count++] = (LumioseAlias){dst, src, size};
+        pthread_mutex_unlock(&g_mlock);
+        LOG("[lumiose test] copied alias %llx -> %llx +%llx\n", (unsigned long long)src,
+            (unsigned long long)dst, (unsigned long long)size);
+        x[0] = R_OK;
+        break;
+    }
+    case 0x75: {  // UnmapProcessMemory, for an experimental alias
+        bool found = false;
+        pthread_mutex_lock(&g_mlock);
+        for (unsigned i = 0; i < lumiose_alias_count; i++) {
+            LumioseAlias *a = &lumiose_aliases[i];
+            if (a->dst == x[0] && a->src == x[2] && a->size == x[3] && x[1] == 0xffff8001u) {
+                for (uint64_t off = 0; off + 4 <= a->size; off += 4) {
+                    uint32_t *src = (uint32_t *)(uintptr_t)(a->src + off);
+                    uint32_t *dst = (uint32_t *)(uintptr_t)(a->dst + off);
+                    if (*src != *dst) {
+                        LOG("[lumiose patch] %llx size 4 value %x (unmap)\n", (unsigned long long)(a->src + off), *dst);
+                        uint32_t value = *dst;
+                        lumiose_mirror(a->src + off, &value, sizeof value);
+                    }
+                }
+                region_remove(a->dst);
+                memmove(a, a + 1, (lumiose_alias_count - i - 1) * sizeof *a);
+                lumiose_alias_count--;
+                found = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_mlock);
+        x[0] = found ? R_OK : R_INVALID_CURRENT_MEMORY;
         break;
     }
     case 0x2C:  // MapPhysicalMemory(addr, size)
@@ -1253,6 +1458,7 @@ void kernel_reset(void) {
     g_syncwaiters = NULL;
     memset(handles, 0, sizeof handles);
     nregions = 0;
+    memset(lumiose_gpu_pools, 0, sizeof lumiose_gpu_pools);
     heap_size = 0;
     tls_next = TLS_BASE;
     next_thread_id = 0x50;
@@ -1291,6 +1497,7 @@ static void *wait_dump_main(void *arg) {
 }
 
 void kernel_init(void) {
+    lumiose_alias_count = 0;
     if (ENV("LARECOMP_WAIT_DUMP")) {
         pthread_t th;
         pthread_create(&th, NULL, wait_dump_main, (void *)(uintptr_t)atoi(ENV("LARECOMP_WAIT_DUMP")));
@@ -1298,6 +1505,13 @@ void kernel_init(void) {
     }
     // Reserve the heap, alias, stack, and TLS regions.
     region_add(TLS_BASE, TLS_SIZE, 0xC, 3);
+    if (g_nmodules > 2) {
+        // The recomp's host functions have virtual addresses but no ARM code. Give
+        // the test a readable placeholder page to record attempted HLE hooks.
+        region_add(HLE_BASE, HLE_SIZE, 3, 5);
+        for (uint64_t off = 0; off < HLE_SIZE; off += 16)
+            *(uint32_t *)(uintptr_t)(HLE_BASE + off) = 0xd65f03c0u;  // ret
+    }
     for (int i = 0; i < g_nmodules; i++) {
         Module *m = &g_modules[i];
         region_add(m->base + m->text_off, m->ro_off - m->text_off, 3, 5);

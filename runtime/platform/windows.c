@@ -580,6 +580,7 @@ static void run_end(void);
 void plat_fatal_notice(void) {
     run_end();
     publish_log();
+    if (getenv("LUMIOSE_TEST_MODULE") && getenv("LARECOMP_HIDDEN")) return;
     char text[1600];
     rt_crash_explain(text, sizeof text, g_log_path);
     if (!g_log_path[0]) return;

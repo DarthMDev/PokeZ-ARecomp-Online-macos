@@ -26,5 +26,18 @@ __pycache__/
 # Private battle UI resource generated from the player's game; never distribute.
 /assets/xbox_attack_layout/
 /tools/hdtools/
+# Lumiose preparation uses only the player's local game files and writes all
+# translated output to a separate work directory. Never commit those outputs.
+/tools/lumiose/objects/
+/tools/lumiose/zig-cache/
+/tools/lumiose/zig-global-cache/
+/tools/lumiose/generated*/
+/lumiose/versions/
+/lumiose/update-work/
+/lumiose/*.dll
+/lumiose/*.dll.id
+/lumiose/update-state.json
+/lumiose/update.lock
+/lumiose/config.json
 # Claude Code: machine-specific notes
 CLAUDE.local.md

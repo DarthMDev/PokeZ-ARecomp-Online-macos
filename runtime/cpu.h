@@ -82,10 +82,18 @@ void fnprof_hit(uint64_t addr, uint64_t lr, uint64_t x0);
 #define LD16(a) (*(const u16u *)(uintptr_t)(a))
 #define LD32(a) (*(const u32u *)(uintptr_t)(a))
 #define LD64(a) (*(const u64u *)(uintptr_t)(a))
+#ifdef LUMIOSE_TEST_CODE
+void lumiose_test_store(uint64_t addr, uint64_t value, unsigned size);
+#define ST8(a, v)  lumiose_test_store((a), (uint8_t)(v), 1)
+#define ST16(a, v) lumiose_test_store((a), (uint16_t)(v), 2)
+#define ST32(a, v) lumiose_test_store((a), (uint32_t)(v), 4)
+#define ST64(a, v) lumiose_test_store((a), (uint64_t)(v), 8)
+#else
 #define ST8(a, v)  (*(u8a *)(uintptr_t)(a) = (uint8_t)(v))
 #define ST16(a, v) (*(u16u *)(uintptr_t)(a) = (uint16_t)(v))
 #define ST32(a, v) (*(u32u *)(uintptr_t)(a) = (uint32_t)(v))
 #define ST64(a, v) (*(u64u *)(uintptr_t)(a) = (uint64_t)(v))
+#endif
 
 // ---- exclusive monitor (emulated with compare-and-swap)
 #define EXCL(N, T)                                                                         \

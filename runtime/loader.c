@@ -1,5 +1,6 @@
 // NSO loading, relocation, and symbol resolution.
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 
 #include "rt.h"
@@ -197,6 +198,60 @@ void loader_load(const char *exefs) {
         m->name = mods[i].name;
         snprintf(path, sizeof path, "%s/%s", exefs, m->name);
         load_nso(m, path, mods[i].base);
+    }
+    // Experimental, explicitly enabled module for the 2.0.2 Lumiose test build.
+    // Keep it separate from normal mod handling until runtime hooks are supported.
+    const char *extra = getenv("LUMIOSE_TEST_MODULE");
+    if (extra && *extra) {
+        static const uint8_t game_id[] = {0xb1,0xf1,0x2f,0xd9,0x19,0xea,0xe8,0x6a};
+        static const uint8_t module_ids[][8] = {
+            {0x54,0x80,0x41,0x1b,0xbe,0x40,0x74,0x5b},  // supplied 1.3.0
+            {0x8e,0x2e,0xa6,0xe5,0xa6,0x0f,0x5c,0xd6},  // signed 1.3.6 update
+            {0x88,0xff,0x70,0x42,0xcd,0x22,0xeb,0x82},  // 1.3.7 recomp-specific build
+            {0xc7,0x91,0x29,0xfe,0x1e,0xea,0x78,0x43},  // 1.3.8 update (experimental)
+            {0x96,0xf2,0xb1,0x42,0x85,0x3f,0xa1,0x51},  // 1.3.9 recomp build 1
+        };
+        uint8_t h[0x60];
+        uint8_t expected_id[20];
+        bool updater_allowed = false;
+        const char *expected = getenv("LUMIOSE_PREPARE_BUILD_ID");
+        if (expected && strlen(expected) == sizeof expected_id * 2) {
+            updater_allowed = true;
+            for (unsigned i = 0; i < sizeof expected_id; i++) {
+                unsigned v;
+                if (!isxdigit((unsigned char)expected[i * 2]) || !isxdigit((unsigned char)expected[i * 2 + 1]) ||
+                    sscanf(expected + i * 2, "%2x", &v) != 1) { updater_allowed = false; break; }
+                expected_id[i] = (uint8_t)v;
+            }
+        }
+        FILE *f;
+        snprintf(path, sizeof path, "%s/main", exefs);
+        f = fopen(path, "rb");
+        if (!f || fread(h, 1, sizeof h, f) != sizeof h || memcmp(h + 0x40, game_id, sizeof game_id))
+            FATAL("Lumiose test requires the 2.0.2 game build\n");
+        fclose(f);
+        f = fopen(extra, "rb");
+        if (!f || fread(h, 1, sizeof h, f) != sizeof h || memcmp(h, "NSO0", 4) ||
+            (memcmp(h + 0x40, module_ids[0], 8) && memcmp(h + 0x40, module_ids[1], 8) &&
+             memcmp(h + 0x40, module_ids[2], 8) && memcmp(h + 0x40, module_ids[3], 8) &&
+             memcmp(h + 0x40, module_ids[4], 8) &&
+             (!updater_allowed || memcmp(h + 0x40, expected_id, sizeof expected_id))))
+            FATAL("Lumiose test module is missing or has a different build ID\n");
+        fclose(f);
+        const uint64_t base = 0x7006200000ull;
+        if (g_modules[0].base + g_modules[0].size > base) FATAL("Lumiose test module overlaps main\n");
+        Module *m = &g_modules[g_nmodules++];
+        memset(m, 0, sizeof *m);
+        m->name = "subsdk9";
+        load_nso(m, extra, base);
+        if (m->base + m->size > SDK_BASE) FATAL("Lumiose test module overlaps sdk\n");
+        // Exlaunch expects the startup module to precede main in the memory map.
+        m = &g_modules[g_nmodules++];
+        memset(m, 0, sizeof *m);
+        m->name = "rtld";
+        snprintf(path, sizeof path, "%s/rtld", exefs);
+        load_nso(m, path, GUEST_LO);
+        if (m->base + m->size > MAIN_BASE) FATAL("Lumiose test rtld overlaps main\n");
     }
     for (int i = 0; i < g_nmodules; i++) relocate(&g_modules[i]);
 }

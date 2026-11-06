@@ -4,13 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "gamelib.h"
 #include "hle.h"
 #include "game_addresses.h"
 
 typedef struct { const uint64_t *addrs; const GuestFn *fns; uint64_t count, lo, hi; } FnTable;
-static FnTable tables[2];
+static FnTable tables[3];
+
+void lumiose_test_branch(Cpu *c, uint64_t entry, uint64_t end) {
+    static int logged;
+    if (!dispatch_lookup(c->pc) && logged++ < 50) LOG("[lumiose branch] %llx in %llx..%llx\n", (unsigned long long)c->pc,
+                           (unsigned long long)entry, (unsigned long long)end);
+}
 
 // HLE stubs live at fake addresses HLE_BASE + 16*i
 #define MAX_HLE 4096
@@ -37,6 +46,8 @@ __attribute__((section(".hle$z"), used)) static const HleImpl __stop_hle_impls[1
 #endif
 
 HostFn hle_lookup_impl(const char *name) {
+    if (!getenv("LUMIOSE_TEST_NETWORK") && !getenv("LUMIOSE_TEST_OFFLINE_CAPTURE") &&
+        (!strncmp(name, "_ZN2nn6socket", 13) || !strncmp(name, "_ZN2nn4nifm", 11))) return NULL;
     const char *skip = getenv("LARECOMP_HLE_SKIP");  // debugging: disable HLE for names containing this
     if (skip && strstr(name, skip)) return NULL;
     const HleImpl *start = __start_hle_impls, *stop = __stop_hle_impls;
@@ -118,10 +129,30 @@ void dispatch_init(void) {  // (after gamelib_load)
     uint64_t nm = *g->main_count, ns = *g->sdk_count;
     tables[0] = (FnTable){g->main_addrs, g->main_fns, nm, g->main_addrs[0], g->main_addrs[nm - 1]};
     tables[1] = (FnTable){g->sdk_addrs, g->sdk_fns, ns, g->sdk_addrs[0], g->sdk_addrs[ns - 1]};
+    memset(&tables[2], 0, sizeof tables[2]);
+    if (g_nmodules > 2) {
+#ifdef _WIN32
+        typedef struct { const uint64_t *addrs; const GuestFn *fns; uint64_t count; } ExtraTable;
+        typedef const ExtraTable *(*ExtraEntry)(void);
+        const char *path = getenv("LUMIOSE_TEST_LIBRARY");
+        if (!path || !*path) FATAL("Lumiose test library path not supplied\n");
+        HMODULE lib = LoadLibraryA(path);
+        if (!lib) FATAL("Lumiose test library could not load (Windows error %lu)\n", GetLastError());
+        ExtraEntry entry = (ExtraEntry)(void *)GetProcAddress(lib, "lumiose_test_table");
+        const ExtraTable *x = entry ? entry() : NULL;
+        if (!x || !x->addrs || !x->fns || !x->count || x->addrs[0] < g_modules[2].base ||
+            x->addrs[x->count - 1] >= g_modules[2].base + g_modules[2].text_size)
+            FATAL("Lumiose test library has an invalid function table\n");
+        tables[2] = (FnTable){x->addrs, x->fns, x->count, x->addrs[0], x->addrs[x->count - 1]};
+        LOG("[lumiose test] loaded %llu translated functions\n", (unsigned long long)x->count);
+#else
+        FATAL("Lumiose test is only configured for Windows\n");
+#endif
+    }
 }
 
 GuestFn dispatch_lookup(uint64_t addr) {
-    for (int t = 0; t < 2; t++) {
+    for (int t = 0; t < 3; t++) {
         FnTable *ft = &tables[t];
         if (addr < ft->lo || addr > ft->hi) continue;
         uint64_t lo = 0, hi = ft->count;
@@ -222,9 +253,37 @@ __attribute__((noinline)) static GuestFn dispatch_slow(Cpu *c) {
         rt_unwind_point();  // (HLE calls aren't cached below, so every one passes here: a reboot's safe point)
         int i = (int)((pc - HLE_BASE) / 16);
         if (i < hle_count) {
+            // An exlaunch hook on a host-backed SDK function writes an absolute
+            // branch into its placeholder. Dispatch that branch to the module.
+            if (g_nmodules > 2 && *(uint64_t *)(uintptr_t)pc == 0xd61f022058000051ull) {
+                uint64_t target = *(uint64_t *)(uintptr_t)(pc + 8);
+                GuestFn hook = dispatch_lookup(target);
+                if (!hook) FATAL("Lumiose HLE hook target %llx is not translated\n", (unsigned long long)target);
+                c->pc = target;
+                return hook;
+            }
             if (hle_slots[i].fn) return hle_slots[i].fn;
             unimpl_pc = pc;
             return hle_unimplemented;
+        }
+    }
+    // A trampoline for such a hook contains the placeholder's original RET,
+    // followed by an absolute jump to the next host slot. Invoke the original
+    // host implementation instead of interpreting that placeholder.
+    if (g_nmodules > 2 && pc >= g_modules[2].base &&
+        pc + 32 <= g_modules[2].base + g_modules[2].text_size) {
+        uint32_t *w = (uint32_t *)(uintptr_t)pc;
+        if (w[0] == 0xd65f03c0u && !w[1] && !w[2] && !w[3] &&
+            w[4] == 0x58000051u && w[5] == 0xd61f0220u) {
+            uint64_t after = *(uint64_t *)(uintptr_t)(pc + 24);
+            if (after >= HLE_BASE + 16 && after <= HLE_BASE + HLE_SIZE && !((after - HLE_BASE) % 16)) {
+                int i = (int)((after - HLE_BASE) / 16) - 1;
+                if (i < hle_count) {
+                    if (hle_slots[i].fn) return hle_slots[i].fn;
+                    unimpl_pc = HLE_BASE + 16ull * i;
+                    return hle_unimplemented;
+                }
+            }
         }
     }
     for (int i = 0; i < override_count; i++)
@@ -257,6 +316,22 @@ __attribute__((noinline)) static void dispatch_miss(Cpu *c) {
 
 // Always tail-calls, so chains of indirect jumps don't grow the host stack.
 void rt_dispatch(Cpu *c) {
+    // Lumiose probes an optional character map while creating temporary models.
+    // Some intro and evolution objects have a different layout; their alleged
+    // map count or mutex word is not a valid map. Treat the lookup as absent.
+    bool lumiose_map_probe = g_nmodules > 2 &&
+        (c->pc == MAIN_BASE + 0x649df8 || c->pc == MAIN_BASE + 0x649d34) &&
+        c->x[30] >= g_modules[2].base && c->x[30] < g_modules[2].base + g_modules[2].text_size;
+    uint64_t count_offset = c->pc == MAIN_BASE + 0x649d34 ? 0x80 : 8;
+    if (lumiose_map_probe && c->x[0] >= GUEST_LO && c->x[0] <= GUEST_HI - 0xb4) {
+        uint64_t buckets = *(const uint64_t *)(uintptr_t)(c->x[0] + count_offset);
+        uint32_t mutex = c->pc == MAIN_BASE + 0x649d34 ? *(const uint32_t *)(uintptr_t)(c->x[0] + 0xb0) : 0;
+        if (buckets > 0x100000 || (mutex & 0xbfff0000u)) {
+            LOG("[lumiose] skipped unavailable optional character map (bucket count %llx, mutex %x)\n", (unsigned long long)buckets, mutex);
+            c->x[0] = 0;
+            return;
+        }
+    }
     unsigned h = (unsigned)(c->pc >> 2) & (DCACHE - 1);
     if (__builtin_expect(dcache[h].addr == c->pc, 1)) {
         GuestFn f = dcache[h].fn;
@@ -283,10 +358,10 @@ const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
     static uint64_t n;
     static __thread char name[32];
     if (!byhost) {
-        uint64_t total = tables[0].count + tables[1].count, k = 0;
+        uint64_t total = tables[0].count + tables[1].count + tables[2].count, k = 0;
         uint64_t (*v)[2] = malloc(total * sizeof *v);
         if (!v) return NULL;
-        for (int t = 0; t < 2; t++)
+        for (int t = 0; t < 3; t++)
             for (uint64_t i = 0; i < tables[t].count; i++) {
                 v[k][0] = (uint64_t)(uintptr_t)tables[t].fns[i];
                 v[k++][1] = tables[t].addrs[i];

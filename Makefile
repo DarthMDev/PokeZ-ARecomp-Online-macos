@@ -227,6 +227,13 @@ $(B)/rt/ui/%.o: runtime/ui/%.mm $(RT_HDRS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(UIFLAGS) -c $< -o $@
 
+# Embed the launcher artwork, so the executable does not depend on a loose image.
+$(B)/inc/lumiose_background.inc: assets/lumiose_online.png tools/embed_lumiose_background.py
+	@mkdir -p $(dir $@)
+	$(if $(PY),$(PY),python3) tools/embed_lumiose_background.py $< $@
+$(B)/rt/ui/launcher.o: $(B)/inc/lumiose_background.inc
+$(B)/rt/ui/launcher.o: CXXFLAGS += -I$(B)/inc
+
 $(B)/imgui/%.o: $(IMGUI)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@

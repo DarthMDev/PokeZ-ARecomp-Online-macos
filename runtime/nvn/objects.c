@@ -296,6 +296,7 @@ NVN(nvnMemoryPoolInitialize) {
                 (unsigned long long)p->storage, (unsigned long long)p->size);
     }
     SET_HOST(A(0), p);
+    if (!(p->flags & 8)) kernel_gpu_pool_add(A(0), p->storage, p->size);
     if (getenv("LARECOMP_LOG_BINDS")) LOG("[pool] %llx + %llu KB flags %#x\n", (unsigned long long)p->storage, (unsigned long long)(p->size >> 10), p->flags);
     if (npools < 256) pools[npools++] = *p;  // (debug: nvn_pool_flags_at)
     RET(1);
@@ -307,7 +308,7 @@ int nvn_pool_flags_at(uint64_t addr) {
         if (addr >= pools[i].storage && addr < pools[i].storage + pools[i].size) return (int)pools[i].flags;
     return -1;
 }
-NVN(nvnMemoryPoolFinalize) { free(HOST(NvnPool, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnMemoryPoolFinalize) { kernel_gpu_pool_remove(A(0)); free(HOST(NvnPool, A(0))); SET_HOST(A(0), 0); }
 NVN(nvnMemoryPoolSetDebugLabel) { (void)c; static int seen_; if (!seen_++ && ENV("LARECOMP_LOG_NOOP")) LOG("[nvn] no-op called: nvnMemoryPoolSetDebugLabel\n"); }
 NVN(nvnMemoryPoolMap) { RET(HOST(NvnPool, A(0))->storage); }
 NVN(nvnMemoryPoolGetBufferAddress) { RET(HOST(NvnPool, A(0))->storage); }  // GPU address == CPU address
@@ -642,8 +643,16 @@ NVN(nvnTextureWriteTexels) {
         tegra_swizzle(AP(3), (uint8_t *)(uintptr_t)t->addr + l.offset, l.wb, l.hb, r[5] > 0 ? (uint32_t)r[5] : 1,
                       t->layout.fmt->bpb, l.block_height_log2, l.block_depth_log2);
         backend_pool_written(t->addr, tegra_total_size(&t->layout));
+    } else if (r && !A(1) && A(3) && t->layout.fmt && t->layout.fmt->bw == 1 && t->layout.fmt->bh == 1 &&
+               t->layout.depth == 1 && t->layout.layers <= 1 && r[0] >= 0 && r[1] >= 0 && r[2] == 0 &&
+               r[3] > 0 && r[4] > 0 && r[5] == 1 && (uint32_t)r[0] < l.w && (uint32_t)r[1] < l.h &&
+               (uint32_t)r[3] <= l.w - (uint32_t)r[0] && (uint32_t)r[4] <= l.h - (uint32_t)r[1]) {
+        tegra_swizzle_rect(AP(3), (uint8_t *)(uintptr_t)t->addr + l.offset, l.w, l.h,
+                           (uint32_t)r[0], (uint32_t)r[1], (uint32_t)r[3], (uint32_t)r[4],
+                           t->layout.fmt->bpb, l.block_height_log2);
+        backend_pool_written(t->addr, tegra_total_size(&t->layout));
     } else {
-        LOG("[nvn] partial WriteTexels not implemented\n");
+        LOG("[nvn] unsupported partial WriteTexels region\n");
     }
 }
 NVN(nvnTextureWriteTexelsStrided) { LOG("[nvn] WriteTexelsStrided not implemented\n"); (void)c; }

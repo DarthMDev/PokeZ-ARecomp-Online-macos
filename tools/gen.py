@@ -94,6 +94,10 @@ class Module:
     def boundaries(self):
         n, b = self.nso, self.base
         starts = set()
+        # The loader calls these entries directly even when they have no exported symbol or unwind record.
+        for tag in (12, 13):  # DT_INIT, DT_FINI
+            if n.dyn.get(tag):
+                starts.add(b + n.dyn[tag])
         for a in eh_frame_functions(n):
             starts.add(b + a)
         for name, info, shndx, value, size in n.syms:
@@ -368,7 +372,7 @@ class Module:
                     tables[a] = jt
                     labels.update(jt)
                     self.stats['jumptables'] += 1
-                elif self.computed_target(a, entry):
+                elif self.name == 'lumiose' or self.computed_target(a, entry):
                     # unresolved table jump: allow jumping to any instruction of the function
                     tables[a] = 'all'
                     self.stats['br_all_labels'] += 1
@@ -549,6 +553,8 @@ class Module:
             out.append('L_dispatch:')
             cases = ' '.join(f'case {hx(t)}: goto L_{t:x};' for t in range(entry, end, 4))
             out.append(f'    switch (c->pc) {{ {cases} default: break; }}')
+            if self.name == 'lumiose':
+                out.append(f'    {{ extern void lumiose_test_branch(Cpu *, uint64_t, uint64_t); lumiose_test_branch(c, {hx(entry)}, {hx(end)}); }}')
             out.append('    __attribute__((musttail)) return rt_dispatch(c);')
         out.append('}')
         self._refs = refs
@@ -621,6 +627,17 @@ def main():
         label, build_id = game_addresses.VERSIONS[version]
         print(f'{args.name}: game version {label} (build {build_id[:16]}), address table {version}', file=sys.stderr)
     starts = m.boundaries()
+    extra_entries = os.environ.get('LUMIOSE_TEST_ENTRIES_' + args.name.upper(), '')
+    if args.name == 'lumiose' and not extra_entries:
+        extra_entries = os.environ.get('LUMIOSE_TEST_ENTRIES', '')
+    if extra_entries:
+        # Experimental hook and jump-table targets collected from the isolated test.
+        for value in extra_entries.split(','):
+            if value.strip():
+                target = args.base + int(value.strip(), 0)
+                if not m.in_text(target):
+                    raise ValueError(f'experimental entry outside module text: {target:#x}')
+                starts.append(target)
     hle = {}
     if args.hle and os.path.exists(args.hle):
         want = {l.strip() for l in open(args.hle) if l.strip() and not l.startswith('#')}

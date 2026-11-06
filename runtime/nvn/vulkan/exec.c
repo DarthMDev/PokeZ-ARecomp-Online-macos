@@ -6594,14 +6594,15 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
         // levels don't keep the ratio (135 -> 202, 33 -> 50, 16 -> 25), the culling read the wrong depths and dropped
         // visible objects - lamp posts, hedges, parts of buildings vanishing as the player walked. Integer scales are
         // exact and keep it. The game's frustum and distance culling still run. LARECOMP_FRACTIONAL_OCCLUSION=1: keep it.
-        static int keep = -1;
+        static int keep = -1, disable = -1;
         if (keep < 0) keep = ENV("LARECOMP_FRACTIONAL_OCCLUSION") && atoi(ENV("LARECOMP_FRACTIONAL_OCCLUSION"));
-        TexBackend *pb = stage == 5 && view && !keep && ent && ent->tex ? (TexBackend *)ent->tex->backend : NULL;
+        if (disable < 0) disable = ENV("LARECOMP_DISABLE_OCCLUSION_CULLING") && atoi(ENV("LARECOMP_DISABLE_OCCLUSION_CULLING"));
+        TexBackend *pb = stage == 5 && view && (!keep || disable) && ent && ent->tex ? (TexBackend *)ent->tex->backend : NULL;
         if (pb && pb->scalable && pb->levels > 1 && (pb->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) &&
-            (pb->sx != floorf(pb->sx) || pb->sy != floorf(pb->sy))) {
+            (disable || pb->sx != floorf(pb->sx) || pb->sy != floorf(pb->sy))) {
             static int nlog;
-            if (nlog++ < 3) LOG("[vk] non-integer scale %.2f: occlusion culling's depth pyramid (%ux%u, %u levels) off for this compute shader\n",
-                                pb->sx, ent->tex->width, ent->tex->height, pb->levels);
+            if (nlog++ < 3) LOG("[vk] %s scale %.2f: occlusion culling's depth pyramid (%ux%u, %u levels) off for this compute shader\n",
+                                disable ? "workaround at" : "non-integer", pb->sx, ent->tex->width, ent->tex->height, pb->levels);
             view = VK_NULL_HANDLE;
         }
     }

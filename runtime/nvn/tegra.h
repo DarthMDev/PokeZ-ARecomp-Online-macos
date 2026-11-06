@@ -40,3 +40,7 @@ void tegra_deswizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb,
                      uint32_t block_height_log2, uint32_t block_depth_log2);
 void tegra_swizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb, uint32_t d, uint32_t bpb,
                    uint32_t block_height_log2, uint32_t block_depth_log2);
+// Copy a tightly packed rectangular part of a 2D uncompressed level into its block-linear storage.
+void tegra_swizzle_rect(const uint8_t *src, uint8_t *dst, uint32_t full_width, uint32_t full_height,
+                        uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t bpp,
+                        uint32_t block_height_log2);

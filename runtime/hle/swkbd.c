@@ -7,7 +7,7 @@
 
 #include "../hle.h"
 
-int menu_keyboard_run(const char *initial, int max_len, char *out, int cap);  // runtime/ui/menu.mm
+int menu_keyboard_run(const char *initial, int max_len, char *out, int cap, bool chat);  // runtime/ui/menu.mm
 
 // nn::swkbd::ShowKeyboard(nn::swkbd::String *out, const nn::swkbd::ShowKeyboardArg &arg) -> nn::Result
 // String = {void *ptr; size_t bufSize}
@@ -39,17 +39,28 @@ HLE_FUNC("_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE", swk
     int max_len = (int)*(const int32_t *)(uintptr_t)(arg + 0x3ac);
     uint32_t off = *(const uint32_t *)(uintptr_t)(arg + 0x3c0), n = *(const uint32_t *)(uintptr_t)(arg + 0x3c4);
     uint64_t wb = LD64(arg + 0x4d0);
-    char initial[96] = "";
+    // Lumiose's chat calls through a game stub with no name-length setting.
+    // Bound its larger entry by the guest's output buffer, while retaining the
+    // game's own limits for names and other keyboard requests.
+    bool chat = g_nmodules > 2 && c->x[30] >= g_modules[2].base &&
+                c->x[30] < g_modules[2].base + g_modules[2].text_size && max_len <= 0;
+    bool utf8 = *(const uint8_t *)(uintptr_t)(arg + 0x3bd) != 0;
+    if (chat) {
+        uint64_t units = utf8 ? size : size / 2;
+        max_len = units > 1 ? (int)(units - 1 < 200 ? units - 1 : 200) : 0;
+    }
+    char initial[1024] = "";
     for (uint32_t i = 0; wb && i < n && i < sizeof initial - 1; i++) {
         uint16_t ch = *(const uint16_t *)(uintptr_t)(wb + off + 2 * i);
         initial[i] = ch < 0x80 ? (char)ch : '?';
     }
-    char text[96];
-    int ok = menu_keyboard_run(initial, max_len, text, sizeof text);
+    char text[1024];
+    int ok = menu_keyboard_run(initial, max_len, text, sizeof text, chat);
     if (!ok) snprintf(text, sizeof text, "%s", initial);  // cancelled: keep what was there
-    bool utf8 = *(const uint8_t *)(uintptr_t)(arg + 0x3bd) != 0;
-    LOG("[swkbd] name entry (max %d, initial \"%s\", %s): %s \"%s\"\n", max_len, initial, utf8 ? "UTF-8" : "UTF-16",
-        ok ? "entered" : "cancelled", text);
+    if (chat) LOG("[swkbd] chat entry (max %d, %s): %s (%zu bytes)\n", max_len, utf8 ? "UTF-8" : "UTF-16",
+                  ok ? "entered" : "cancelled", strlen(text));
+    else LOG("[swkbd] name entry (max %d, initial \"%s\", %s): %s \"%s\"\n", max_len, initial, utf8 ? "UTF-8" : "UTF-16",
+             ok ? "entered" : "cancelled", text);
     if (ptr && size) {
         memset((void *)(uintptr_t)ptr, 0, size);
         if (utf8) snprintf((char *)(uintptr_t)ptr, size, "%s", text);

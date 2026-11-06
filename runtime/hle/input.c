@@ -431,6 +431,20 @@ static void mouse_stick(int32_t *rx, int32_t *ry) {
 // the window to the front, or one meant for the menu, is not a ball thrown
 static _Atomic bool mouse_held;
 static _Atomic uint64_t mouse_buttons;
+// Packed Switch touch coordinates. A pending press preserves a quick click until the guest reads it.
+static _Atomic uint64_t touch_active, touch_pending, touch_sampling;
+static SDL_Window *touch_window;
+#define TOUCH_VALID (1ull << 63)
+static bool mouse_touch_enabled(void) {
+    return pad != NULL || getenv("LUMIOSE_MOUSE_TOUCH_TEST") != NULL;
+}
+static uint64_t touch_position(float x, float y) {
+    int w = 0, h = 0;
+    if (touch_window) SDL_GetWindowSize(touch_window, &w, &h);
+    if (w <= 0 || h <= 0 || x < 0 || y < 0 || x >= w || y >= h) return 0;
+    uint32_t tx = (uint32_t)(x * 1280.0f / w), ty = (uint32_t)(y * 720.0f / h);
+    return TOUCH_VALID | ((uint64_t)ty << 32) | tx;
+}
 static uint8_t mouse_down[MOUSEB_COUNT];
 static void recompute_mouse(void) {
     uint64_t b = 0;
@@ -444,8 +458,12 @@ extern bool menu_cursor_needed(void);   // (the cursor wanted on screen: the men
 // Main thread, after each batch of events (runtime/nvn/vulkan/device.c ui_run): the cursor held while the game has
 // the window and the controls - not with the menu or the name entry up (they take the mouse), nor without focus.
 void input_mouse_update(SDL_Window *w) {
+    touch_window = w;
+    if (menu_input_captured() || (!(SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) && !getenv("LUMIOSE_MOUSE_TOUCH_TEST"))) {
+        touch_active = 0; touch_pending = 0;
+    }
     bool want = g_settings.mouse_camera == MOUSE_CAM_CAPTURED && !menu_cursor_needed() && !input_user_blocked_any() &&
-                (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS);
+                !mouse_touch_enabled() && (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS);
     if (want == mouse_held) return;
     SDL_SetWindowRelativeMouseMode(w, want);
     mouse_held = want;
@@ -474,6 +492,7 @@ int input_menu_family(SDL_JoystickID which) {
 // Back on the start screen (runtime/ui/launcher.mm, also after the menu's Quit to Start Screen): the cursor is free
 // again - the game held it for the camera, and nothing calls input_mouse_update while the start screen is up
 void input_mouse_release(SDL_Window *w) {
+    touch_active = 0; touch_pending = 0;
     if (!mouse_held) return;
     SDL_SetWindowRelativeMouseMode(w, false);
     mouse_held = false;
@@ -509,6 +528,7 @@ void input_handle_event(const SDL_Event *e) {
         if (pad && SDL_GetGamepadID(pad) == e->gdevice.which) {
             SDL_RumbleGamepad(pad, 0, 0, 0);
             SDL_CloseGamepad(pad); pad = NULL; note_family();
+            touch_active = 0; touch_pending = 0;
             led_forget();  // (gone: it shows its own colour when it comes back)
             rumble_clear(); rumble_last_lo = rumble_last_hi = 0; rumble_warned = false;
         }
@@ -536,6 +556,13 @@ void input_handle_event(const SDL_Event *e) {
         recompute_pad();
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (e->button.button == SDL_BUTTON_LEFT) {
+            if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) touch_active = 0;
+            else if (mouse_touch_enabled() && !mouse_held && !menu_input_captured()) {
+                uint64_t p = touch_position(e->button.x, e->button.y);
+                touch_active = p; touch_pending = p;
+            }
+        }
         int m = bind_mouse_from_sdl(e->button.button);
         if (m < 0) break;
         if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) mouse_down[m] = 0;
@@ -544,6 +571,7 @@ void input_handle_event(const SDL_Event *e) {
         break;
     }
     case SDL_EVENT_MOUSE_MOTION:  // the mouse turns the camera (right stick): cursor held, or the right button held
+        if (touch_active) touch_active = touch_position(e->motion.x, e->motion.y);
         // (the cursor free while the game plays - hold, or a tool's panels beside the game: the right button held turns it)
         if (mouse_held || (g_settings.mouse_camera != MOUSE_CAM_OFF && !menu_input_captured() && (e->motion.state & SDL_BUTTON_RMASK))) {
             atomic_fetch_add(&mouse_acc_x, (int32_t)lroundf(e->motion.xrel * 16));  // (mouse_stick turns it into speed)
@@ -551,6 +579,27 @@ void input_handle_event(const SDL_Event *e) {
         }
         break;
     }
+}
+
+// Lumiose requests one-finger Switch touchscreen samples through this SDK import.
+HLE_FUNC("_ZN2nn3hid20GetTouchScreenStatesILm1EEEiPNS0_16TouchScreenStateIXT_EEEi", lumiose_touch_states) {
+    if (!c->x[0] || (int32_t)c->x[1] <= 0) { c->x[0] = 0; return; }
+    uint8_t *out = (uint8_t *)(uintptr_t)c->x[0];
+    uint64_t p = atomic_exchange(&touch_pending, 0);
+    if (!p) p = atomic_load(&touch_active);
+    if (menu_input_captured()) p = 0;
+    memset(out, 0, 56);
+    *(uint64_t *)(out + 0) = ++touch_sampling;
+    if (p & TOUCH_VALID) {
+        *(uint32_t *)(out + 8) = 1;
+        *(uint32_t *)(out + 32) = (uint32_t)p;
+        *(uint32_t *)(out + 36) = (uint32_t)((p >> 32) & 0x7fffffff);
+        *(uint32_t *)(out + 40) = 8;
+        *(uint32_t *)(out + 44) = 8;
+        static int logged;
+        if (logged++ < 5) LOG("[touch] mouse tap %u,%u\n", *(uint32_t *)(out + 32), *(uint32_t *)(out + 36));
+    }
+    c->x[0] = 1;
 }
 
 // Scripted input for testing: LARECOMP_INPUT="frame:BUTTON:frames,..." (BUTTON = A,B,X,Y,L,R,ZL,ZR,PLUS,
@@ -635,6 +684,16 @@ static void test_push(uint64_t frame, unsigned long start, unsigned long len, co
         return;
     }
     if (!strcmp(dev, "mouse")) {
+        float tx, ty;
+        if (sscanf(arg, "tap/%f/%f", &tx, &ty) == 2) {
+            if (frame == start || frame == start + len) {
+                e.type = frame == start ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+                e.button.which = TEST_DEVICE; e.button.button = SDL_BUTTON_LEFT;
+                e.button.down = frame == start; e.button.x = tx; e.button.y = ty;
+                SDL_PushEvent(&e);
+            }
+            return;
+        }
         if (frame != start) return;
         float mx, my, dx = 0, dy = 0;
         SDL_GetMouseState(&mx, &my);

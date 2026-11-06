@@ -1,7 +1,7 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (with
 // ‹ Vanilla / seed › picker), SETTINGS, QUIT, game-files status at the lower left. Nothing of the game ships with
 // LAS Recomp: on first launch the user picks the folder with their own game files (v1.0.0), we check the main
-// module's build id, copy the files and build the game's data image; PLAY stays disabled until that worked. The background is a frame of the game's own title movie (from the user's files) once extracted.
+// module's build id, copy the files and build the game's data image; PLAY stays disabled until that worked.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in.
 // The in-game menu's "Title screen" comes back here without leaving the process (runtime/main.c reboots the game).
@@ -20,6 +20,7 @@
 #include <vector>
 #include <algorithm>
 #include <atomic>
+#include "lumiose_background.inc"
 
 #include "imgui.h"
 #include "imgui_internal.h"  // (SetKeyOwner)
@@ -119,8 +120,8 @@ static void lang_update(void) { g_pt = settings_ui_portuguese(); }  // (runtime/
 // The start screen asks GitHub for the project's releases once per launch (a background curl, which macOS and
 // Windows 10+ ship) and offers the best one if it outranks this build: any v<x.y.z> above every beta, betas by
 // number; other tags are ignored. Offline / no curl / anything unexpected: nothing is shown.
-#define RELEASES_URL "https://api.github.com/repos/Hexveil404/PokeZ-ARecomp/releases?per_page=100"
-#define RELEASE_PAGE "https://github.com/Hexveil404/PokeZ-ARecomp/releases/tag/"
+#define RELEASES_URL "https://api.github.com/repos/TheMagnumChad/PokeZ-ARecomp-Online/releases?per_page=100"
+#define RELEASE_PAGE "https://github.com/TheMagnumChad/PokeZ-ARecomp-Online/releases/tag/"
 
 static long long tag_rank(const std::string &t) {
     int n, a, b, c;
@@ -1616,9 +1617,36 @@ static bool toggle(const char *id, bool *v, float x, float y) {
     return pressed;
 }
 
-// ---- the background: a night city of our own (sky, aurora, crescent moon, a tower with golden rings, lit windows),
+static uint64_t party_texture(const void *rgba, int w, int h);
+
+// ---- the background: use the supplied Lumiose artwork, with the original art as a fallback.
 // drawn to cover the window (a 1280 x 720 picture, cropped to the window's shape)
 static void draw_art(ImDrawList *dl, ImVec2 o, ImVec2 ds) {
+    static uint64_t texture;
+    static int width, height;
+    static bool attempted;
+    if (!attempted) {
+        attempted = true;
+        SDL_IOStream *input = SDL_IOFromConstMem(lumiose_background_png, sizeof lumiose_background_png);
+        SDL_Surface *decoded = input ? SDL_LoadPNG_IO(input, true) : NULL;
+        SDL_Surface *pixels = decoded ? SDL_ConvertSurface(decoded, SDL_PIXELFORMAT_ABGR8888) : NULL;
+        if (pixels) {
+            width = pixels->w; height = pixels->h;
+            std::vector<uint8_t> rgba((size_t)width * height * 4);
+            for (int y = 0; y < height; y++)
+                memcpy(&rgba[(size_t)y * width * 4], (uint8_t *)pixels->pixels + (size_t)y * pixels->pitch, (size_t)width * 4);
+            texture = party_texture(rgba.data(), width, height);
+            SDL_DestroySurface(pixels);
+        }
+        if (decoded) SDL_DestroySurface(decoded);
+    }
+    if (texture && width > 0 && height > 0) {
+        float scale = fmaxf(ds.x / width, ds.y / height);
+        ImVec2 size(width * scale, height * scale);
+        ImVec2 pos(o.x + (ds.x - size.x) / 2, o.y + (ds.y - size.y) / 2);
+        dl->AddImage((ImTextureID)texture, pos, ImVec2(pos.x + size.x, pos.y + size.y));
+        return;
+    }
     float k = fmaxf(ds.x / 1280, ds.y / 720);
     ImVec2 off(o.x + (ds.x - 1280 * k) / 2, o.y + (ds.y - 720 * k) / 2);
     auto A = [&](float x, float y) { return ImVec2(off.x + x * k, off.y + y * k); };

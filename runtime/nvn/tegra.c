@@ -147,3 +147,23 @@ void tegra_swizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb, u
                    uint32_t bh_log2, uint32_t bd_log2) {
     copy_surface(src, dst, wb, hb, d, bpb, bh_log2, bd_log2, false);
 }
+
+void tegra_swizzle_rect(const uint8_t *src, uint8_t *dst, uint32_t full_width, uint32_t full_height,
+                        uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t bpp,
+                        uint32_t bh_log2) {
+    uint32_t width_gobs = (full_width * bpp + 63) / 64;
+    uint32_t gob_rows = 8u << bh_log2;
+    uint64_t blocks_rows = (full_height + gob_rows - 1) / gob_rows;
+    uint32_t bytes = width * bpp;
+    for (uint32_t row = 0; row < height; row++) {
+        uint32_t done = 0;
+        while (done < bytes) {
+            uint32_t xb = x * bpp + done;
+            uint32_t n = 16 - (xb & 15);
+            if (n > bytes - done) n = bytes - done;
+            memcpy(dst + gob_offset(xb, y + row, 0, width_gobs, bh_log2, 0, blocks_rows),
+                   src + (uint64_t)row * bytes + done, n);
+            done += n;
+        }
+    }
+}

@@ -4,6 +4,10 @@
 
 #include "rt.h"
 
+// Large NVN pools visible to the mod's camera-memory scanner.
+void kernel_gpu_pool_add(uint64_t key, uint64_t addr, uint64_t size);
+void kernel_gpu_pool_remove(uint64_t key);
+
 #define STACK_BASE 0x7200000000ull
 #define STACK_SIZE 0x0040000000ull
 

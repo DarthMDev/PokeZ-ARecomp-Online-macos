@@ -150,8 +150,9 @@ static ImGuiKey key_from_scancode(SDL_Scancode sc) {
 // they last used a controller.
 static std::atomic<int> g_kbd{0};  // 1 open, 2 confirmed, 3 cancelled
 static std::atomic<bool> g_last_pad{false};
-static char g_kbd_text[96];
+static char g_kbd_text[1024];
 static int g_kbd_max = 8;
+static std::atomic<bool> g_kbd_chat{false};
 // (DevTools, runtime/ui/devtools.mm - weak: absent from a build without it)
 extern "C" __attribute__((weak)) bool devtools_open(void);
 extern "C" __attribute__((weak)) void devtools_toggle(void);
@@ -1121,10 +1122,11 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
     ImGui::Begin("##kbd", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                     ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::PushFont(g_font_big);
-    ImGui::TextColored(ImVec4(0.95f, 0.71f, 0.27f, 1), "%s", TR("Enter your name", "Digite seu nome"));
+    ImGui::TextColored(ImVec4(0.95f, 0.71f, 0.27f, 1), "%s", g_kbd_chat.load() ?
+                       TR("Type a chat message", "Digite uma mensagem") : TR("Enter your name", "Digite seu nome"));
     ImGui::PopFont();
     static bool was_open, was_pad;
-    bool pad = g_last_pad.load(), appearing = !was_open || pad != was_pad;  // (switching device: focus the new one)
+    bool pad = !g_kbd_chat.load() && g_last_pad.load(), appearing = !was_open || pad != was_pad;
     was_open = true, was_pad = pad;
     if (!pad) {  // keyboard: type straight into the field
         if (appearing) ImGui::SetKeyboardFocusHere();
@@ -1147,10 +1149,11 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
 
 // Game thread (runtime/hle/swkbd.c): show the dialog, re-present the last frame until it's answered.
 // Returns 1 confirmed (out = text, UTF-8), 0 cancelled.
-extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, int cap) {
+extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, int cap, bool chat) {
     extern void backend_represent(void);
     snprintf(g_kbd_text, sizeof g_kbd_text, "%s", initial ? initial : "");
     g_kbd_max = max_len > 0 && max_len < (int)sizeof g_kbd_text / 4 ? max_len : 8;
+    g_kbd_chat = chat;
     input_reset();
     g_kbd = 1;
     // (test) LARECOMP_KBD_AUTO=<text>: answer at once
@@ -1175,6 +1178,7 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
     bool ok = g_kbd.load() == 2 && g_kbd_text[0];
     if (ok) snprintf(out, cap, "%s", g_kbd_text);
     g_kbd = 0;
+    g_kbd_chat = false;
     input_reset();
     return ok;
 }
