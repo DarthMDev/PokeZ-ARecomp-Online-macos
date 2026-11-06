@@ -1,10 +1,13 @@
 import json
+import hashlib
+import io
 import os
 from pathlib import Path
 import stat
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 import linux_launcher_update as update
 
@@ -101,5 +104,25 @@ class LinuxLauncherUpdateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'symbolic-link'):
             update.install(self.root, self.archive)
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_release_download_checks_asset_size_and_digest(self):
+        payload = b'archive bytes'
+        tag = 'v1.2.3'
+        asset = {'name': update.ASSET, 'size': len(payload), 'digest': 'sha256:' + hashlib.sha256(payload).hexdigest(),
+                 'browser_download_url': f'https://github.com/{update.REPO}/releases/download/{tag}/{update.ASSET}'}
+        release = {'tag_name': tag, 'draft': False, 'prerelease': False, 'assets': [asset]}
+        with patch.object(update.urllib.request, 'urlopen', side_effect=[io.BytesIO(json.dumps(release).encode()), io.BytesIO(payload)]):
+            update.download_release(tag, self.archive)
+        self.assertEqual(self.archive.read_bytes(), payload)
+        asset['digest'] = 'sha256:' + '0' * 64
+        with patch.object(update.urllib.request, 'urlopen', side_effect=[io.BytesIO(json.dumps(release).encode()), io.BytesIO(payload)]):
+            with self.assertRaisesRegex(RuntimeError, 'verification'): update.download_release(tag, self.archive)
+
+    def test_rejects_prerelease_and_untrusted_asset(self):
+        release = {'tag_name': 'v1.2.3', 'prerelease': True, 'assets': []}
+        with patch.object(update.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(release).encode())):
+            with self.assertRaisesRegex(RuntimeError, 'stable'): update.download_release('v1.2.3', self.archive)
+        with self.assertRaisesRegex(RuntimeError, 'Invalid release tag'):
+            update.download_release('../other', self.archive)
 
 if __name__ == '__main__': unittest.main()
