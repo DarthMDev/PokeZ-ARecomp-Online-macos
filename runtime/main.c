@@ -296,7 +296,7 @@ static void log_startup_info(void) {
 static void lumiose_linux_entry(void) {
     if (getenv("LUMIOSE_FIRST_SETUP") || getenv("LUMIOSE_TEST_MODULE") ||
         getenv("LARECOMP_LAUNCHER_SHOT")) return;
-    char exe[4096], mod[4096], python[4096], script[4096];
+    char exe[4096], mod[4096], launcher[4096];
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (n <= 0 || n >= (ssize_t)sizeof exe - 1) return;
     exe[n] = 0;
@@ -304,13 +304,12 @@ static void lumiose_linux_entry(void) {
     if (!slash) return;
     *slash = 0;
     if (snprintf(mod, sizeof mod, "%s/lumiose/subsdk9", exe) >= (int)sizeof mod || access(mod, F_OK)) return;
-    if (snprintf(python, sizeof python, "%s/python/bin/python3.12", exe) >= (int)sizeof python ||
-        snprintf(script, sizeof script, "%s/tools/lumiose/entry.py", exe) >= (int)sizeof script ||
-        access(python, X_OK) || access(script, R_OK)) {
+    if (snprintf(launcher, sizeof launcher, "%s/../../Lumiose Online", exe) >= (int)sizeof launcher ||
+        access(launcher, R_OK)) {
         fprintf(stderr, "Lumiose launcher files are missing; please extract the complete release again.\n");
         exit(1);
     }
-    execl(python, python, script, (char *)NULL);
+    execl("/bin/sh", "sh", launcher, (char *)NULL);
     perror("Unable to start the Lumiose launcher");
     exit(1);
 }

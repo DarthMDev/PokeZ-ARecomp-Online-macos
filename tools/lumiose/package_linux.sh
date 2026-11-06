@@ -32,6 +32,13 @@ cat > "$out/Lumiose Online" <<'EOF'
 #!/bin/sh
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -f "$HERE/.lumiose-update/journal.json" ]; then
+  BACKUP="$HERE/.lumiose-update/backup/usr/bin"
+  "$BACKUP/python/bin/python3.12" "$BACKUP/tools/lumiose/linux_launcher_update.py" --root "$HERE" --recover || {
+    command -v kdialog >/dev/null 2>&1 && kdialog --error 'The interrupted update could not be restored. Your game and saves were not changed.'
+    exit 1
+  }
+fi
 cd "$HERE/usr/bin"
 exec "$HERE/usr/bin/python/bin/python3.12" tools/lumiose/entry.py "$@"
 EOF
@@ -46,6 +53,8 @@ The game files and generated game code are not included.
 When updating, extract over your existing installation; do not remove its
 usr/bin/extracted, usr/bin/save, usr/bin/larecomp.ini or usr/bin/lumiose folders.
 Existing Linux installations will re-prepare Lumiose once on first launch.
+After this build is installed, stable releases containing the Linux package
+can be installed with Update now on the launcher screen.
 
 This build has not yet been validated end to end on a Steam Deck.
 EOF

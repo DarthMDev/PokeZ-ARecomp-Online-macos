@@ -21,16 +21,21 @@ jobs:
             bash tools/lumiose/package_linux.sh
             d="$PWD/build/dist/Lumiose Online Linux/usr/bin"
             probe="$PWD/build/linux/direct-entry-test"
-            mkdir -p "$probe/lumiose" "$probe/python/bin" "$probe/tools/lumiose"
-            cp "$d/lasrecomp" "$probe/lasrecomp"
-            touch "$probe/lumiose/subsdk9" "$probe/tools/lumiose/entry.py"
-            printf "#!/bin/sh\n: > \"\$LUMIOSE_ENTRY_PROBE\"\n" > "$probe/python/bin/python3.12"
-            chmod +x "$probe/python/bin/python3.12"
-            LUMIOSE_ENTRY_PROBE="$probe/ran" LD_LIBRARY_PATH="$d/../lib" "$probe/lasrecomp"
+            mkdir -p "$probe/usr/bin/lumiose"
+            cp "$d/lasrecomp" "$probe/usr/bin/lasrecomp"
+            touch "$probe/usr/bin/lumiose/subsdk9"
+            printf "#!/bin/sh\n: > \"\$LUMIOSE_ENTRY_PROBE\"\n" > "$probe/Lumiose Online"
+            LUMIOSE_ENTRY_PROBE="$probe/ran" LD_LIBRARY_PATH="$d/../lib" "$probe/usr/bin/lasrecomp"
             test -f "$probe/ran"
             echo "Direct runtime launch correctly routes through the Lumiose launcher."
             cd build/dist
-            zip -qry Lumiose-Online-linux-experimental.zip "Lumiose Online Linux"'
+            zip -qry Lumiose-Online-linux-experimental.zip "Lumiose Online Linux"
+            copy="$PWD/update-smoke"
+            cp -a "Lumiose Online Linux" "$copy"
+            mkdir -p "$copy/usr/bin/save"
+            echo preserved > "$copy/usr/bin/save/main"
+            LUMIOSE_UPDATE_SMOKE_ROOT="$copy" LUMIOSE_UPDATE_SMOKE_ZIP="$PWD/Lumiose-Online-linux-experimental.zip" \
+              PYTHONPATH="$d/tools/lumiose" "$d/python/bin/python3.12" -c "import os; from pathlib import Path; import linux_launcher_update as u; root=Path(os.environ[\"LUMIOSE_UPDATE_SMOKE_ROOT\"]); u.install(root, os.environ[\"LUMIOSE_UPDATE_SMOKE_ZIP\"]); assert (root / \"usr/bin/save/main\").read_text().strip() == \"preserved\"; print(\"Full package update preserved the save\")"'
       - uses: actions/upload-artifact@v4
         with:
           name: Lumiose-Online-linux-experimental
