@@ -17,3 +17,28 @@ jobs:
           clang -std=gnu11 -fsyntax-only -Iruntime runtime/dispatch.c runtime/hle/lumiose_network.c
           "$RUNNER_TEMP/test-venv/bin/python" -m compileall -q tools/lumiose
           PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" -m unittest discover -s tools/lumiose -p 'test_*.py'
+      - name: Exercise native shared-library compiler
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, tarfile, urllib.request
+          index = json.load(urllib.request.urlopen('https://ziglang.org/download/index.json'))
+          info = index['0.17.0']['x86_64-linux']
+          data = urllib.request.urlopen(info['tarball']).read()
+          assert hashlib.sha256(data).hexdigest() == info['shasum']
+          archive = pathlib.Path('zig.tar.xz'); archive.write_bytes(data)
+          with tarfile.open(archive) as tar: tar.extractall('zig-native', filter='data')
+          PY
+          zig_dir=$(find "$PWD/zig-native" -type f -name zig -printf '%h\n' -quit)
+          mkdir -p "$RUNNER_TEMP/probe/generated" "$RUNNER_TEMP/probe/objects"
+          cat > "$RUNNER_TEMP/probe/generated/stub.c" <<'EOF'
+          #include "gamelib.h"
+          static void stub(Cpu *c) { (void)c; }
+          const uint64_t lumiose_fn_addrs[] = {0x7006200000ull};
+          const uint64_t lumiose_fn_count = 1;
+          const GuestFn lumiose_fn_ptrs[] = {stub};
+          EOF
+          LUMIOSE_ZIG_DIR="$zig_dir" LUMIOSE_SCRATCH="$RUNNER_TEMP/probe" \
+          LUMIOSE_GENERATED_DIR="$RUNNER_TEMP/probe/generated" LUMIOSE_MODULE_OBJECT_DIR="$RUNNER_TEMP/probe/objects" \
+          LUMIOSE_LIBRARY_OUTPUT="$RUNNER_TEMP/probe/lumiose.so" \
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" tools/lumiose/build_module.py
+          python3 -c 'import ctypes,os; lib=ctypes.CDLL(os.environ["RUNNER_TEMP"]+"/probe/lumiose.so"); assert lib.lumiose_test_table()'
