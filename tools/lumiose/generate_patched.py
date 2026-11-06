@@ -19,6 +19,8 @@ for name, offsets in entries.items():
 python = sys.executable
 jobs = [('main', 'main', '0x7000000000'), ('sdk', 'sdk', '0x7008000000'),
         ('lumiose', 'subsdk9', '0x7006200000')]
+if os.environ.get('LUMIOSE_SKIP_GAME_GENERATION') == '1':
+    jobs = [job for job in jobs if job[0] == 'lumiose']
 
 def generate(job):
     name, nso, base = job

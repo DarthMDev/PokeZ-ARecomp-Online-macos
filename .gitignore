@@ -34,6 +34,7 @@ __pycache__/
 /tools/lumiose/generated*/
 /lumiose/versions/
 /lumiose/update-work/
+/lumiose/generation-cache/
 /lumiose/*.dll
 /lumiose/*.dll.id
 /lumiose/update-state.json

@@ -191,8 +191,17 @@ def main():
     run([py, str(ROOT / 'tools' / 'lumiose' / 'build_module.py')], env, a.work / 'bootstrap-build.log')
     capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / 'bootstrap.dll', a.vanilla,
             candidate.build_id, snapshot=True)
-    for script in ('prepare_patched_modules.py', 'find_hook_entries.py', 'generate_patched.py'):
+    for script in ('prepare_patched_modules.py', 'find_hook_entries.py'):
         run([py, str(ROOT / 'tools' / 'lumiose' / script)], env, a.work / (script + '.log'))
+    from fast_retarget import current_cache, retarget, save_cache
+    cache_root = a.game.parent / 'lumiose' / 'generation-cache'
+    cached = current_cache(cache_root)
+    if cached and retarget(cached, a.work):
+        env['LUMIOSE_SKIP_GAME_GENERATION'] = '1'
+    else:
+        env.pop('LUMIOSE_SKIP_GAME_GENERATION', None)
+    run([py, str(ROOT / 'tools' / 'lumiose' / 'generate_patched.py')], env,
+        a.work / 'generate_patched.py.log')
     patch_generated(a.work)
     env.update(LUMIOSE_GENERATED_DIR=str(a.work / 'generated' / 'lumiose'),
                LUMIOSE_MODULE_OBJECT_DIR=str(a.work / 'module-objects'),
@@ -202,6 +211,10 @@ def main():
         run([py, str(ROOT / 'tools' / 'lumiose' / script)], env, a.work / (script + '.log'))
     version = capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / 'lumiose.dll', a.work / 'lasgame.dll',
                       candidate.build_id, snapshot=False)
+    try:
+        save_cache(cache_root, a.work)
+    except Exception as e:
+        print('Could not save the optional speed-up cache:', e, flush=True)
     (a.work / 'prepared.json').write_text(json.dumps({'build_id': candidate.build_id, 'version': version}) + '\n')
     print('Update prepared and startup verified.', flush=True)
 

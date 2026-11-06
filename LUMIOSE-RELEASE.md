@@ -10,6 +10,8 @@
 When Lumiose reports an update, close the game and open **Lumiose Online.exe**
 again. The update is prepared and checked before it is activated. A future
 version with incompatible changes may require an updated release of this fork.
+After the first preparation, a local cache normally avoids re-translating
+unchanged game code. The cache stays on your computer and is never distributed.
 
 Your saves, settings, game files and generated game code remain on your computer.
 The launcher checks this fork's GitHub releases for launcher updates. For help
