@@ -153,6 +153,7 @@ static std::atomic<bool> g_last_pad{false};
 static char g_kbd_text[1024];
 static int g_kbd_max = 8;
 static std::atomic<bool> g_kbd_chat{false};
+static std::atomic<unsigned> g_kbd_sequence{0};
 // (DevTools, runtime/ui/devtools.mm - weak: absent from a build without it)
 extern "C" __attribute__((weak)) bool devtools_open(void);
 extern "C" __attribute__((weak)) void devtools_toggle(void);
@@ -1115,6 +1116,34 @@ RT_ON_RESET(menu_reset) {
 }
 
 static void keyboard_draw(ImGuiIO &io, float scale) {
+    if (g_kbd_chat.load()) {
+        // The mod lays out its chat at the lower left of a 1920x1080 HUD.
+        // Draw only the editable text field over the mod's existing input row.
+        float hud = io.DisplaySize.y / 1080.0f;
+        ImGui::SetNextWindowPos(ImVec2(20 * hud, io.DisplaySize.y - 43 * hud), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(500 * hud, 32 * hud), ImGuiCond_Always);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * hud, 3 * hud));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.06f, 0.07f, 0.10f, 0.95f));
+        ImGui::Begin("##lumiose-chat-input", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+        static unsigned focused_sequence;
+        unsigned sequence = g_kbd_sequence.load();
+        if (focused_sequence != sequence) { ImGui::SetKeyboardFocusHere(); focused_sequence = sequence; }
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputText("##chat", g_kbd_text,
+                         (size_t)(g_kbd_max * 4 + 1 < (int)sizeof g_kbd_text ? g_kbd_max * 4 + 1 : sizeof g_kbd_text),
+                         ImGuiInputTextFlags_CallbackCharFilter,
+                         [](ImGuiInputTextCallbackData *d) -> int { return d->EventChar < 0x20 ? 1 : 0; });
+        kbd_cut(g_kbd_text, g_kbd_max);
+        ImGui::End();
+        ImGui::PopStyleColor(4);
+        ImGui::PopStyleVar(2);
+        return;
+    }
     ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 120));
     float w = fminf(io.DisplaySize.x * 0.9f, 1100 * scale);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -1154,6 +1183,7 @@ extern "C" int menu_keyboard_run(const char *initial, int max_len, char *out, in
     snprintf(g_kbd_text, sizeof g_kbd_text, "%s", initial ? initial : "");
     g_kbd_max = max_len > 0 && max_len < (int)sizeof g_kbd_text / 4 ? max_len : 8;
     g_kbd_chat = chat;
+    g_kbd_sequence.fetch_add(1);
     input_reset();
     g_kbd = 1;
     // (test) LARECOMP_KBD_AUTO=<text>: answer at once

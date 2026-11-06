@@ -131,18 +131,52 @@ def capture(exe, game, work, module, library, gamelib, build_id, *, snapshot, se
                 p.kill(); p.wait()
 
 
-def patch_generated(work):
+def patch_generated(work, build_id):
     root = work / 'generated' / 'lumiose'
-    matches = [p for p in root.glob('lumiose_*.c') if 'void f_7006237cb0(Cpu *c) {' in p.read_text()]
-    if len(matches) != 1:
-        raise RuntimeError('Trainer-name compatibility code has changed')
-    source = matches[0].read_text()
-    targets = re.findall(r'c->x\[30\] = 0x7006237d80ull; (f_[0-9a-f]+)\(c\);', source)
-    if len(targets) != 1:
-        raise RuntimeError('Trainer-name compatibility call has changed')
-    # The adjustment script checks each expected instruction before changing it.
+    # Locate the name code from its structure, then verify every edit. Mod
+    # updates routinely move functions and globals without changing semantics.
+    files = [(p, p.read_text()) for p in root.glob('lumiose_*.c')]
+    functions = []
+    for p, text in files:
+        starts = list(re.finditer(r'^void f_([0-9a-f]+)\(Cpu \*c\) \{', text, re.M))
+        for i, match in enumerate(starts):
+            end = starts[i + 1].start() if i + 1 < len(starts) else len(text)
+            functions.append((p, match.group(1), text[match.start():end],
+                              starts[i + 1].group(1) if i + 1 < len(starts) else None))
+    def one(items, reason):
+        if len(items) != 1: raise RuntimeError('Trainer-name compatibility ' + reason + ' changed or is ambiguous')
+        return items[0]
+    init = one([f for f in functions if '0x54500000ull' in f[2] and
+                'c->x[2] = (uint64_t)(0x0ull);\n    (void)(logic64(c, c->x[3] & 0xfull));' in f[2]], 'initializer')
+    dest = one(re.findall(r'c->x\[0\] = \(uint64_t\)\(0x([0-9a-f]+)ull\);\n'
+                          r'    c->x\[0\] = \(uint64_t\)\(c->x\[0\] \+ (0x[0-9a-f]+)ull\);\n'
+                          r'    xr_19 = \(uint64_t\)\(xr_19 \+ (0x[0-9a-f]+)ull\);\n'
+                          r'    c->x\[30\] = 0x([0-9a-f]+)ull; (f_[0-9a-f]+)\(c\);', init[2]), 'copy')
+    base, offset, struct_offset, return_pc, target = dest
+    name_addr = f'{int(base, 16) + int(offset, 16):x}'
+    getter = one([f for f in functions if 'c->x[4] = (uint32_t)(0x6c81ull);' in f[2] and
+                  'c->x[1] = (uint32_t)(0x9487ull);' in f[2] and
+                  '{ uint64_t ea = c->x[2] + 0x0ull; ST64(ea, c->x[3]); }' in f[2]], 'getter')
+    if not getter[3]: raise RuntimeError('Trainer-name compatibility getter boundary changed')
+    default = one(re.findall(r'c->x\[3\] = \(uint64_t\)\(0x([0-9a-f]+)ull\);\n'
+                             r'    c->x\[3\] = \(uint64_t\)\(c->x\[3\] \+ (0x[0-9a-f]+)ull\);', getter[2]), 'default')
+    setter_pattern = (f'c->x[0] = (uint64_t)(0x{base}ull);\n'
+                      f'    c->x[0] = (uint64_t)(c->x[0] + {offset}ull);')
+    setter = one([f for f in functions if setter_pattern in f[2] and
+                  '(void)(subs64(c, c->x[2], 0x17ull));' in f[2] and f[1] != init[1]], 'setter')
+    # This call site identifies the game-to-mod trainer update. Keep the
+    # exact surrounding instructions checked so unrelated calls cannot match.
+    ready = one([(p, m.group(1)) for p, text in files for m in re.finditer(
+        r'c->x\[0\] = \(uint64_t\)\(0x[0-9a-f]+ull\);\n'
+        r'    c->x\[0\] = \(uint64_t\)\(c->x\[0\] \+ 0x[0-9a-f]+ull\);\n'
+        r'    c->x\[30\] = 0x([0-9a-f]+)ull; f_' + setter[1] + r'\(c\);', text)], 'ready hook')
+    changes = {'7006237cb0': init[1], '7006237f50': getter[1], '7006237f80': getter[3],
+               '7006237d80': return_pc, '70068088d8': name_addr,
+               '700634d000': default[0], '0x480ull': struct_offset + 'ull', '0xc18ull': default[1] + 'ull',
+               '700622ad4c': ready[1], 'f_7006237500(c)': 'f_' + setter[1] + '(c)',
+               'f_700632ce40(c)': target + '(c)'}
     patch = (ROOT / 'tools' / 'lumiose' / 'preserve_name_139.py').read_text()
-    patch = patch.replace('f_700632ce40(c)', targets[0] + '(c)')
+    for old, new in changes.items(): patch = patch.replace(old, new)
     previous = os.environ.get('LUMIOSE_SCRATCH')
     os.environ['LUMIOSE_SCRATCH'] = str(work)
     try:
@@ -202,7 +236,7 @@ def main():
         env.pop('LUMIOSE_SKIP_GAME_GENERATION', None)
     run([py, str(ROOT / 'tools' / 'lumiose' / 'generate_patched.py')], env,
         a.work / 'generate_patched.py.log')
-    patch_generated(a.work)
+    patch_generated(a.work, candidate.build_id)
     env.update(LUMIOSE_GENERATED_DIR=str(a.work / 'generated' / 'lumiose'),
                LUMIOSE_MODULE_OBJECT_DIR=str(a.work / 'module-objects'),
                LUMIOSE_LIBRARY_OUTPUT=str(a.work / 'lumiose.dll'),
