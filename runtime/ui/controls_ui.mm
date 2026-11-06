@@ -95,9 +95,10 @@ static void stick_mouse_rows() {
         changed |= opt_choice(TR("Camera", "Câmera"), &g_settings.mouse_camera, modes, 3, MOUSE_CAM_CAPTURED,
                               TR("Always: while you play, the cursor is hidden and moving the mouse turns the camera; F1 or "
                                  "Esc (the menu) or switching windows gives the cursor back. The mouse buttons below work "
-                                 "only then.",
+                                 "only then. Hold Left Alt to free the cursor and click the game's touch interface.",
                                  "Sempre: enquanto você joga, o cursor some e mexer o mouse gira a câmera; F1 ou Esc (o "
-                                 "menu) ou trocar de janela devolve o cursor. Os botões do mouse abaixo só valem nesse modo."),
+                                 "menu) ou trocar de janela devolve o cursor. Segure Alt esquerdo para clicar na interface. "
+                                 "Os botões do mouse abaixo só valem nesse modo."),
                               false);
         changed |= opt_slider(TR("Camera speed", "Velocidade da câmera"), &g_settings.mouse_sens, 0.1f, 5.0f, 0.05f, 1.0f,
                               "%.2f", TR("How fast the mouse turns the camera.", "O quanto o mouse gira a câmera."));

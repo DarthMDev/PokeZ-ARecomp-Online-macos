@@ -436,7 +436,7 @@ static _Atomic uint64_t touch_active, touch_pending, touch_sampling;
 static SDL_Window *touch_window;
 #define TOUCH_VALID (1ull << 63)
 static bool mouse_touch_enabled(void) {
-    return pad != NULL || getenv("LUMIOSE_MOUSE_TOUCH_TEST") != NULL;
+    return pad != NULL || keys_down[SDL_SCANCODE_LALT] || getenv("LUMIOSE_MOUSE_TOUCH_TEST") != NULL;
 }
 static uint64_t touch_position(float x, float y) {
     int w = 0, h = 0;
@@ -461,12 +461,17 @@ void input_mouse_update(SDL_Window *w) {
     touch_window = w;
     if (menu_input_captured() || (!(SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) && !getenv("LUMIOSE_MOUSE_TOUCH_TEST"))) {
         touch_active = 0; touch_pending = 0;
+        if (!(SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS)) keys_down[SDL_SCANCODE_LALT] = 0;
     }
     bool want = g_settings.mouse_camera == MOUSE_CAM_CAPTURED && !menu_cursor_needed() && !input_user_blocked_any() &&
                 !mouse_touch_enabled() && (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS);
+    if (!want && keys_down[SDL_SCANCODE_LALT] && (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS)) {
+        SDL_ShowCursor(); cursor_hidden = false;
+    }
     if (want == mouse_held) return;
     SDL_SetWindowRelativeMouseMode(w, want);
     mouse_held = want;
+    if (want) touch_active = 0;
     memset(mouse_down, 0, sizeof mouse_down);  // (a button held across the change: released)
     recompute_mouse();
     mouse_acc_x = mouse_acc_y = 0;
@@ -515,6 +520,8 @@ void input_handle_event(const SDL_Event *e) {
         if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F9 && !e->key.repeat) g_debug_frame_request = 1;
         if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F10 && !e->key.repeat) g_shot_request = 1;
         if (e->key.scancode < SDL_SCANCODE_COUNT) keys_down[e->key.scancode] = e->type == SDL_EVENT_KEY_DOWN;
+        // Apply the cursor transition before processing a click in the same event batch.
+        if (e->key.scancode == SDL_SCANCODE_LALT && touch_window) input_mouse_update(touch_window);
         uint64_t before = key_buttons;
         recompute_keyboard();
         uint64_t now = key_buttons;
@@ -573,7 +580,7 @@ void input_handle_event(const SDL_Event *e) {
     case SDL_EVENT_MOUSE_MOTION:  // the mouse turns the camera (right stick): cursor held, or the right button held
         if (touch_active) touch_active = touch_position(e->motion.x, e->motion.y);
         // (the cursor free while the game plays - hold, or a tool's panels beside the game: the right button held turns it)
-        if (mouse_held || (g_settings.mouse_camera != MOUSE_CAM_OFF && !menu_input_captured() && (e->motion.state & SDL_BUTTON_RMASK))) {
+        if (mouse_held || (!keys_down[SDL_SCANCODE_LALT] && g_settings.mouse_camera != MOUSE_CAM_OFF && !menu_input_captured() && (e->motion.state & SDL_BUTTON_RMASK))) {
             atomic_fetch_add(&mouse_acc_x, (int32_t)lroundf(e->motion.xrel * 16));  // (mouse_stick turns it into speed)
             atomic_fetch_add(&mouse_acc_y, (int32_t)lroundf(e->motion.yrel * 16));
         }

@@ -32,7 +32,9 @@ def main():
     vanilla = game / GAME_LIBRARY
     vanilla_id = game / (GAME_LIBRARY + '.id')
     reference = ROOT / 'lumiose' / 'subsdk9'
-    required = [exe, vanilla, vanilla_id, zig / ZIG, reference]
+    bundled = ROOT / 'tools/lumiose/prepackaged.subsdk9'
+    candidate = bundled if bundled.is_file() else reference  # older installations
+    required = [exe, vanilla, vanilla_id, zig / ZIG, reference, candidate]
     if WINDOWS: required.append(ROOT / 'build' / 'lasrecomp.dll.a')
     for p in required:
         if not p.is_file(): raise RuntimeError(f'Required file is missing: {p}')
@@ -44,14 +46,14 @@ def main():
     work_root.mkdir(exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix='initial-', dir=work_root))
     cmd = [sys.executable, str(ROOT / 'tools/lumiose/auto_prepare.py'),
-           '--candidate', str(reference), '--reference', str(reference), '--game', str(game),
+           '--candidate', str(candidate), '--reference', str(reference), '--game', str(game),
            '--vanilla', str(vanilla), '--exe', str(exe), '--zig', str(zig),
            '--cache', str(game / '.gamebuild'), '--work', str(work)]
     if subprocess.run(cmd, cwd=ROOT).returncode: raise RuntimeError(f'Preparation failed; see {work}')
     result = json.loads((work / 'prepared.json').read_text())
     files = ((work / 'input/exefs/subsdk9', 'subsdk9'), (work / MODULE_LIBRARY, MODULE_LIBRARY),
              (work / GAME_LIBRARY, GAME_LIBRARY), (vanilla_id, GAME_LIBRARY + '.id'))
-    version_dir = result['build_id'] + '-' + sha(reference)[:16]
+    version_dir = result['build_id'] + '-' + sha(candidate)[:16]
     versions = mod / 'versions'
     versions.mkdir(exist_ok=True)
     dest = versions / version_dir
@@ -64,7 +66,7 @@ def main():
     shutil.copy2(vanilla_id, mod / (GAME_LIBRARY + '.id'))
     sd = install / 'save/sdcard/atmosphere/contents/0100F43008C44000/exefs/subsdk9'
     # Only mark the SD-card file consumed if it is the exact mod we prepared.
-    seen = sha(sd) if sd.is_file() and sha(sd) == sha(reference) else None
+    seen = sha(sd) if sd.is_file() and sha(sd) == sha(candidate) else None
     config = {'install': str(install), 'reference': str(reference), 'vanilla': str(vanilla),
               'zig': str(zig), 'cache': str(game / '.gamebuild'), 'server': args.server}
     state = {'build_id': result['build_id'], 'version': result['version'], 'version_dir': version_dir,

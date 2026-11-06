@@ -57,6 +57,8 @@ def main():
         copy_file(ROOT / 'tools' / n, out / 'tools' / n)
     copy_file(ROOT / 'tools/rando/patch_variants.json', out / 'tools/rando/patch_variants.json')
     shutil.copytree(ROOT / 'tools/lumiose', out / 'tools/lumiose', ignore=shutil.ignore_patterns('__pycache__'))
+    if not (out / 'tools/lumiose/prepackaged.subsdk9').is_file():
+        raise RuntimeError('The prepackaged Lumiose mod is missing')
     copy_file(ROOT / 'lumiose/subsdk9', out / 'lumiose/subsdk9')
     for n in ('python.exe', 'python312.dll', 'python3.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'LICENSE.txt'):
         copy_file(a.python / n, out / 'python' / n)
@@ -71,9 +73,9 @@ def main():
         if f.suffix.lower() in forbidden or f.name.lower() in {'main', 'main.npdm', 'sdk', 'rtld', 'romfs.bin', 'prod.keys', 'lasgame.dll'}:
             raise RuntimeError(f'Game file unexpectedly present: {f}')
         with f.open('rb') as stream: magic = stream.read(4)
-        if magic == b'NSO0' and f != out / 'lumiose/subsdk9':
+        if magic == b'NSO0' and f not in (out / 'lumiose/subsdk9', out / 'tools/lumiose/prepackaged.subsdk9'):
             raise RuntimeError(f'Unexpected NSO module: {f}')
-    print(f'Packaged {sum(1 for f in out.rglob("*") if f.is_file())} files; only the Lumiose mod NSO is included.')
+    print(f'Packaged {sum(1 for f in out.rglob("*") if f.is_file())} files; only Lumiose mod NSOs are included.')
 
 
 if __name__ == '__main__':
