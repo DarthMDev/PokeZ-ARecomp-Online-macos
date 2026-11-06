@@ -19,6 +19,16 @@ jobs:
             apt-get install -y --no-install-recommends dotnet-sdk-8.0 python3-venv zip
             JOBS=4 PYTHON=python3.12 ZIP=0 DEB=0 tools/za/dist-linux.sh
             bash tools/lumiose/package_linux.sh
+            d="$PWD/build/dist/Lumiose Online Linux/usr/bin"
+            probe="$PWD/build/linux/direct-entry-test"
+            mkdir -p "$probe/lumiose" "$probe/python/bin" "$probe/tools/lumiose"
+            cp "$d/lasrecomp" "$probe/lasrecomp"
+            touch "$probe/lumiose/subsdk9" "$probe/tools/lumiose/entry.py"
+            printf "#!/bin/sh\n: > \"\$LUMIOSE_ENTRY_PROBE\"\n" > "$probe/python/bin/python3.12"
+            chmod +x "$probe/python/bin/python3.12"
+            LUMIOSE_ENTRY_PROBE="$probe/ran" LD_LIBRARY_PATH="$d/../lib" "$probe/lasrecomp"
+            test -f "$probe/ran"
+            echo "Direct runtime launch correctly routes through the Lumiose launcher."
             cd build/dist
             zip -qry Lumiose-Online-linux-experimental.zip "Lumiose Online Linux"'
       - uses: actions/upload-artifact@v4

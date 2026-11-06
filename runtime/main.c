@@ -14,6 +14,9 @@
 #include "platform.h"
 #include "gamebuild.h"  // (gamelib_old_cpu)
 #include <stdio.h>
+#ifdef __linux__
+#include <unistd.h>
+#endif
 #if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
 #endif
@@ -285,7 +288,38 @@ static void log_startup_info(void) {
             si.cpu[0] ? si.cpu : "unknown CPU", cores, ram, si.package ? ", " : "", si.package ? si.package : "");
 }
 
+#ifdef __linux__
+// The portable Lumiose package also contains the underlying runtime. When a
+// user opens it directly, route through the preparer rather than silently
+// starting an unmodded game. Development builds and isolated captures do not
+// contain this adjacent package layout or explicitly mark their purpose.
+static void lumiose_linux_entry(void) {
+    if (getenv("LUMIOSE_FIRST_SETUP") || getenv("LUMIOSE_TEST_MODULE") ||
+        getenv("LARECOMP_LAUNCHER_SHOT")) return;
+    char exe[4096], mod[4096], python[4096], script[4096];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n <= 0 || n >= (ssize_t)sizeof exe - 1) return;
+    exe[n] = 0;
+    char *slash = strrchr(exe, '/');
+    if (!slash) return;
+    *slash = 0;
+    if (snprintf(mod, sizeof mod, "%s/lumiose/subsdk9", exe) >= (int)sizeof mod || access(mod, F_OK)) return;
+    if (snprintf(python, sizeof python, "%s/python/bin/python3.12", exe) >= (int)sizeof python ||
+        snprintf(script, sizeof script, "%s/tools/lumiose/entry.py", exe) >= (int)sizeof script ||
+        access(python, X_OK) || access(script, R_OK)) {
+        fprintf(stderr, "Lumiose launcher files are missing; please extract the complete release again.\n");
+        exit(1);
+    }
+    execl(python, python, script, (char *)NULL);
+    perror("Unable to start the Lumiose launcher");
+    exit(1);
+}
+#endif
+
 int main(int argc, char **argv) {
+#ifdef __linux__
+    lumiose_linux_entry();
+#endif
     plat_init();
     log_startup_info();
     if (getenv("LARECOMP_REEXEC")) {  // (reserve_guest_space started this process again)

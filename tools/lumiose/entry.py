@@ -3,11 +3,21 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import shutil
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools' / 'lumiose'))
 from auto_launch import launch
 from platform_paths import EXECUTABLE, GAME_LIBRARY, lock_file
+
+
+def desktop_notice(title, message, error=False):
+    if os.name == 'nt': return
+    command = shutil.which('kdialog') if error else shutil.which('notify-send')
+    if command:
+        args = [command, '--error', title + '\n\n' + message] if error else [command, title, message]
+        try: subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError: pass
 
 
 def main():
@@ -32,6 +42,7 @@ def main():
             raise RuntimeError('Game setup was not completed. Start Lumiose Online again when you are ready.')
         cmd = [sys.executable, str(ROOT / 'tools/lumiose/setup.py'), '--install', str(ROOT),
                '--zig', str(ROOT / 'zig'), '--server', '135.148.167.226:27777']
+        desktop_notice('Lumiose Online', 'Preparing the online mod. This may take several minutes.')
         if subprocess.run(cmd, cwd=ROOT).returncode:
             raise RuntimeError('Lumiose preparation did not finish; see the message above.')
     if not config.is_file():
@@ -47,6 +58,11 @@ def main():
 
 
 if __name__ == '__main__':
+    if os.name != 'nt' and not sys.stderr.isatty():
+        log_dir = ROOT / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log = (log_dir / 'lumiose-launch.log').open('a', encoding='utf-8', buffering=1)
+        sys.stdout = sys.stderr = log
     try:
         lock_path = ROOT / 'lumiose' / 'update.lock'
         with lock_path.open('a+b') as lock:
@@ -55,5 +71,6 @@ if __name__ == '__main__':
             main()
     except Exception as e:
         print('\nLumiose could not start:', e, file=sys.stderr, flush=True)
+        desktop_notice('Lumiose Online could not start', str(e) + '\nDetails: logs/lumiose-launch.log', error=True)
         if sys.stdin.isatty(): input('Press Enter to close this window. ')
         sys.exit(1)
