@@ -1,0 +1,20 @@
+name: Lumiose Linux runtime build
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+    paths: ['.github/workflows/lumiose-linux-build.yml']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build environment
+        run: docker build -t za-linux-build -f tools/linux/Containerfile tools/linux
+      - name: Build native runtime without game files
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src za-linux-build bash -euo pipefail -c '
+            git config --global --add safe.directory /src
+            apt-get update -qq
+            apt-get install -y --no-install-recommends python3-venv
+            JOBS=4 tools/za/build-linux.sh'

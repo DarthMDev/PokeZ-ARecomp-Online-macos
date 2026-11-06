@@ -145,7 +145,11 @@ static std::string g_update_tag;  // a newer release's tag (g_update_lock)
 static std::string g_update_url;  // its Windows zip (browser_download_url: the download counts on GitHub as a click)
 static long long g_update_size;
 static pthread_mutex_t g_update_lock = PTHREAD_MUTEX_INITIALIZER;
+#ifdef __linux__
+#define UPDATE_ASSET "Lumiose-Online-linux-experimental.zip"
+#else
 #define UPDATE_ASSET "ZA-Recomp-windows.zip"
+#endif
 
 static void *update_thread(void *) {
     std::string body;
@@ -333,6 +337,33 @@ static void *upd_cleanup(void *) {
         if (it->path().extension() == ".old" && fs::remove(it->path(), ec)) n++;
     }
     if (n) rt_launcher_log("[update] %d replaced files deleted\n", n);
+    return NULL;
+}
+#elif defined(__linux__)
+// Download and install through the packaged Python helper. The helper verifies
+// the GitHub release digest and restores program files if installation fails.
+static void *upd_thread(void *) {
+    pthread_mutex_lock(&g_update_lock);
+    std::string tag = g_update_tag;
+    pthread_mutex_unlock(&g_update_lock);
+    std::string dir = rt_exe_dir();
+    std::string python = dir + "/python/bin/python3.12";
+    std::string helper = dir + "/tools/lumiose/linux_launcher_update.py";
+    std::string root = dir + "/../..";
+    std::string log = std::string(rt_data_root()) + "/logs/launcher-update.log";
+    mkdir((std::string(rt_data_root()) + "/logs").c_str(), 0755);
+    const char *av[] = {python.c_str(), helper.c_str(), "--root", root.c_str(), "--tag", tag.c_str(), NULL};
+    PlatProc p = plat_spawn(av, log.c_str(), false);
+    if (!p || plat_proc_wait(p, true) != 0) {
+        rt_launcher_log("[update] Linux launcher update failed; see %s\n", log.c_str());
+        pthread_mutex_lock(&g_update_lock);
+        g_upd_error = "see logs/launcher-update.log";
+        pthread_mutex_unlock(&g_update_lock);
+        g_upd_state = UPD_FAILED;
+    } else {
+        rt_launcher_log("[update] Linux launcher update installed\n");
+        g_upd_state = UPD_DONE;
+    }
     return NULL;
 }
 #endif
@@ -3096,11 +3127,23 @@ extern "C" void launcher_run(const char *root) {
                 long long upd_size = g_update_size;
                 pthread_mutex_unlock(&g_update_lock);
                 int ust = g_upd_state.load();
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
                 if (ust == UPD_DONE) {  // the new program, same command line; this one ends
                     rt_launcher_log("[update] starting the new version\n");
+#ifdef _WIN32
                     if (plat_relaunch()) exit(0);
                     rt_paths_restart();  // (could not start it detached: the old way, waited for)
+#else
+                    std::string dir = rt_exe_dir();
+                    std::string python = dir + "/python/bin/python3.12";
+                    std::string entry = dir + "/tools/lumiose/entry.py";
+                    const char *av[] = {python.c_str(), entry.c_str(), NULL};
+                    if (plat_spawn(av, NULL, false)) exit(0);
+                    pthread_mutex_lock(&g_update_lock);
+                    g_upd_error = "could not reopen the launcher";
+                    pthread_mutex_unlock(&g_update_lock);
+                    g_upd_state = UPD_FAILED;
+#endif
                 }
                 static bool auto_upd = getenv("LARECOMP_UPDATE_AUTO") != NULL;  // (test) no click
                 if (!upd.empty() && !upd_url.empty() && ust == UPD_IDLE && (auto_upd || g_update_go)) {
@@ -3118,12 +3161,16 @@ extern "C" void launcher_run(const char *root) {
                     std::string msg;
                     float frac = -1;  // the bar: done part, or -1 (unknown: a moving segment)
                     if (ust == UPD_DOWNLOAD) {
+#ifdef __linux__
+                        msg = std::string(TR("Downloading and installing ", "Baixando e instalando a versão ")) + tag_label(upd, false) + "…";
+#else
                         long long got = 0;
                         if (FILE *f = fopen(g_upd_zip.c_str(), "rb")) { fseek(f, 0, SEEK_END); got = ftell(f); fclose(f); }
                         int pc = upd_size > 0 ? (int)(got * 100 / upd_size) : -1;
                         if (pc >= 0) frac = (pc > 100 ? 100 : pc) / 100.0f;
                         msg = std::string(TR("Downloading ", "Baixando a versão ")) + tag_label(upd, false) +
                               (pc >= 0 ? " — " + std::to_string(pc > 100 ? 100 : pc) + "%" : std::string("…"));
+#endif
                     } else if (ust == UPD_UNPACK) msg = TR("Unpacking the update…", "Descompactando a atualização…");
                     else if (ust == UPD_INSTALL) msg = TR("Installing the update…", "Instalando a atualização…");
                     else msg = std::string(TR("Update failed (", "A atualização falhou (")) + upd_err +
@@ -3172,7 +3219,7 @@ extern "C" void launcher_run(const char *root) {
                         ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
                     }
                     if (click) SDL_OpenURL((RELEASE_PAGE + upd).c_str());
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
                     if (!upd_url.empty() && !busy) {  // "Update now" before it (not while the game code builds)
                         const char *bl = TR("Update now", "Atualizar agora");
                         ImVec2 bs = text_size(F_LABEL, 14, bl);

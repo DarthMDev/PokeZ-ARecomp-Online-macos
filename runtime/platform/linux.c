@@ -204,7 +204,8 @@ int plat_thread_realtime_check(uint64_t period_ns) { (void)period_ns; return -1;
 static char g_log_path[1024];
 
 static void log_to_file_without_terminal(void) {
-    if (isatty(STDERR_FILENO)) return;
+    // The Lumiose preparer owns this pipe and watches its isolated startup log.
+    if (isatty(STDERR_FILENO) || getenv("LUMIOSE_TEST_OFFLINE_CAPTURE")) return;
     char dir[900];
     if (!rt_data_root_early(dir, sizeof dir)) return;  // dev mode: wherever stderr goes already
     for (char *c = dir + 1; *c; c++)

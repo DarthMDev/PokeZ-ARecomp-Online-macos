@@ -189,6 +189,7 @@ def patch_generated(work, build_id):
 
 
 def main():
+    from platform_paths import WINDOWS, GAME_LIBRARY, MODULE_LIBRARY
     p = argparse.ArgumentParser()
     for arg in ('candidate', 'reference', 'game', 'vanilla', 'exe', 'zig', 'cache', 'work'):
         p.add_argument('--' + arg, type=Path, required=True)
@@ -221,9 +222,9 @@ def main():
     run([py, str(gen), 'lumiose', str(staged / 'subsdk9'), '0x7006200000', str(bootstrap), '--simd', 'c'],
         env, a.work / 'bootstrap-generation.log')
     env.update(LUMIOSE_GENERATED_DIR=str(bootstrap), LUMIOSE_MODULE_OBJECT_DIR=str(a.work / 'bootstrap-objects'),
-               LUMIOSE_LIBRARY_OUTPUT=str(a.work / 'bootstrap.dll'))
+               LUMIOSE_LIBRARY_OUTPUT=str(a.work / ('bootstrap.dll' if WINDOWS else 'bootstrap.so')))
     run([py, str(ROOT / 'tools' / 'lumiose' / 'build_module.py')], env, a.work / 'bootstrap-build.log')
-    capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / 'bootstrap.dll', a.vanilla,
+    capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / ('bootstrap.dll' if WINDOWS else 'bootstrap.so'), a.vanilla,
             candidate.build_id, snapshot=True)
     for script in ('prepare_patched_modules.py', 'find_hook_entries.py'):
         run([py, str(ROOT / 'tools' / 'lumiose' / script)], env, a.work / (script + '.log'))
@@ -239,11 +240,11 @@ def main():
     patch_generated(a.work, candidate.build_id)
     env.update(LUMIOSE_GENERATED_DIR=str(a.work / 'generated' / 'lumiose'),
                LUMIOSE_MODULE_OBJECT_DIR=str(a.work / 'module-objects'),
-               LUMIOSE_LIBRARY_OUTPUT=str(a.work / 'lumiose.dll'),
-               LUMIOSE_GAME_OUTPUT=str(a.work / 'lasgame.dll'))
+               LUMIOSE_LIBRARY_OUTPUT=str(a.work / MODULE_LIBRARY),
+               LUMIOSE_GAME_OUTPUT=str(a.work / GAME_LIBRARY))
     for script in ('build_module.py', 'build_patched_game.py'):
         run([py, str(ROOT / 'tools' / 'lumiose' / script)], env, a.work / (script + '.log'))
-    version = capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / 'lumiose.dll', a.work / 'lasgame.dll',
+    version = capture(a.exe, a.game, a.work, staged / 'subsdk9', a.work / MODULE_LIBRARY, a.work / GAME_LIBRARY,
                       candidate.build_id, snapshot=False)
     try:
         save_cache(cache_root, a.work)

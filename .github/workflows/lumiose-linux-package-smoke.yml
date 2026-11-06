@@ -1,0 +1,51 @@
+name: Lumiose Linux package smoke test
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+    paths: ['.github/workflows/lumiose-linux-package-smoke.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Lumiose-Online-linux-experimental
+          run-id: 42286656288
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Unpack and check packaged dependencies
+        run: |
+          unzip -q Lumiose-Online-linux-experimental.zip
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          test -x "$D/lasrecomp"
+          test -x "$D/zig/zig"
+          test -x "$D/python/bin/python3.12"
+          PYTHONPATH="$D/python-deps:$D/tools/lumiose" "$D/python/bin/python3.12" -c 'import capstone, unicorn, lz4, platform_paths; print("Bundled Python imports OK")'
+          "$D/zig/zig" version
+      - name: Show and capture the native launcher
+        timeout-minutes: 5
+        run: |
+          echo 'http://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends xvfb xauth mesa-vulkan-drivers
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          mkdir -p "$RUNNER_TEMP/launcher-data"
+          LARECOMP_DATA_ROOT="$RUNNER_TEMP/launcher-data" LARECOMP_NO_UPDATE_CHECK=1 \
+          LARECOMP_LAUNCHER_SHOT=150 LARECOMP_SHOT_PATH="$RUNNER_TEMP/launcher.png" \
+            timeout --kill-after=5s 90 xvfb-run -a "$D/lasrecomp" || { cat "$RUNNER_TEMP/launcher-data/lasrecomp.log" || true; exit 1; }
+          test -s "$RUNNER_TEMP/launcher.png"
+      - name: Show the Linux launcher update confirmation
+        run: |
+          D="$PWD/Lumiose Online Linux/usr/bin"
+          LARECOMP_DATA_ROOT="$RUNNER_TEMP/launcher-data" LARECOMP_UPDATE_TAGS=v99.0.0 \
+          LARECOMP_UPDATE_ZIP="$RUNNER_TEMP/update.zip" LARECOMP_LAUNCHER_SHOT=150:askupdate \
+          LARECOMP_SHOT_PATH="$RUNNER_TEMP/update.png" timeout --kill-after=5s 90 xvfb-run -a "$D/lasrecomp"
+          test -s "$RUNNER_TEMP/update.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-update-confirmation
+          path: ${{ runner.temp }}/update.png
+          if-no-files-found: error

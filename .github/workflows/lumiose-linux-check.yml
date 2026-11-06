@@ -1,0 +1,68 @@
+name: Lumiose Linux compatibility checks
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/test-venv"
+          "$RUNNER_TEMP/test-venv/bin/pip" install capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5
+      - name: Check native runtime and updater
+        run: |
+          clang -std=gnu11 -fsyntax-only -Iruntime runtime/dispatch.c runtime/hle/lumiose_network.c
+          clang -std=gnu11 -Iruntime tools/tests/test_lumiose_network_linux.c -lpthread -o "$RUNNER_TEMP/test-lumiose-network"
+          "$RUNNER_TEMP/test-lumiose-network"
+          "$RUNNER_TEMP/test-venv/bin/python" -m compileall -q tools/lumiose
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" -m unittest discover -s tools/lumiose -p 'test_*.py'
+      - name: Exercise native shared-library compiler
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, tarfile, urllib.request
+          index = json.load(urllib.request.urlopen('https://ziglang.org/download/index.json'))
+          info = index['0.17.0']['x86_64-linux']
+          data = urllib.request.urlopen(info['tarball']).read()
+          assert hashlib.sha256(data).hexdigest() == info['shasum']
+          archive = pathlib.Path('zig.tar.xz'); archive.write_bytes(data)
+          with tarfile.open(archive) as tar: tar.extractall('zig-native', filter='data')
+          PY
+          zig_dir=$(find "$PWD/zig-native" -type f -name zig -printf '%h\n' -quit)
+          mkdir -p "$RUNNER_TEMP/probe/generated" "$RUNNER_TEMP/probe/objects"
+          cat > "$RUNNER_TEMP/probe/generated/stub.c" <<'EOF'
+          #include "gamelib.h"
+          #ifndef GUEST_VOLATILE
+          #error Missing volatile guest memory accesses
+          #endif
+          static void stub(Cpu *c) { (void)c; }
+          const uint64_t lumiose_fn_addrs[] = {0x7006200000ull};
+          const uint64_t lumiose_fn_count = 1;
+          const GuestFn lumiose_fn_ptrs[] = {stub};
+          EOF
+          LUMIOSE_ZIG_DIR="$zig_dir" LUMIOSE_SCRATCH="$RUNNER_TEMP/probe" \
+          LUMIOSE_GENERATED_DIR="$RUNNER_TEMP/probe/generated" LUMIOSE_MODULE_OBJECT_DIR="$RUNNER_TEMP/probe/objects" \
+          LUMIOSE_LIBRARY_OUTPUT="$RUNNER_TEMP/probe/lumiose.so" \
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" tools/lumiose/build_module.py
+          python3 -c 'import ctypes,os; lib=ctypes.CDLL(os.environ["RUNNER_TEMP"]+"/probe/lumiose.so"); assert lib.lumiose_test_table()'
+          mkdir -p "$RUNNER_TEMP/probe/generated/main" "$RUNNER_TEMP/probe/generated/sdk" "$RUNNER_TEMP/probe/cache"
+          for module in main sdk; do
+            cat > "$RUNNER_TEMP/probe/generated/$module/${module}_table.c" <<EOF
+          #include "gamelib.h"
+          #ifndef GUEST_VOLATILE
+          #error Missing volatile guest memory accesses
+          #endif
+          static void stub(Cpu *c) { (void)c; }
+          const uint64_t ${module}_fn_addrs[] = {0x7000000000ull};
+          const uint64_t ${module}_fn_count = 1;
+          const GuestFn ${module}_fn_ptrs[] = {stub};
+          EOF
+          done
+          printf 'abcd-1234\n' > "$RUNNER_TEMP/probe/game.id"
+          LUMIOSE_ZIG_DIR="$zig_dir" LUMIOSE_SCRATCH="$RUNNER_TEMP/probe" \
+          LUMIOSE_GAME_GEN="$RUNNER_TEMP/probe/generated" LUMIOSE_GAME_CACHE="$RUNNER_TEMP/probe/cache" \
+          LUMIOSE_GAME_ID_FILE="$RUNNER_TEMP/probe/game.id" LUMIOSE_GAME_OUTPUT="$RUNNER_TEMP/probe/lasgame.so" \
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" tools/lumiose/build_patched_game.py
+          python3 -c 'import ctypes,os; lib=ctypes.CDLL(os.environ["RUNNER_TEMP"]+"/probe/lasgame.so"); assert lib.lasgame_tables()'

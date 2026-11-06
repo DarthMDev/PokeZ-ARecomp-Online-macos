@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from platform_paths import WINDOWS, EXECUTABLE, GAME_LIBRARY, MODULE_LIBRARY, ZIG
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,11 +28,13 @@ def main():
     args = ap.parse_args()
     install, zig = args.install.resolve(), args.zig.resolve()
     game = install / 'extracted'
-    exe = install / 'lasrecomp.exe'
-    vanilla = game / 'lasgame.dll'
-    vanilla_id = game / 'lasgame.dll.id'
+    exe = install / EXECUTABLE
+    vanilla = game / GAME_LIBRARY
+    vanilla_id = game / (GAME_LIBRARY + '.id')
     reference = ROOT / 'lumiose' / 'subsdk9'
-    for p in (exe, vanilla, vanilla_id, zig / 'zig.exe', reference, ROOT / 'build' / 'lasrecomp.dll.a'):
+    required = [exe, vanilla, vanilla_id, zig / ZIG, reference]
+    if WINDOWS: required.append(ROOT / 'build' / 'lasrecomp.dll.a')
+    for p in required:
         if not p.is_file(): raise RuntimeError(f'Required file is missing: {p}')
     mod = install / 'lumiose'
     mod.mkdir(exist_ok=True)
@@ -46,8 +49,8 @@ def main():
            '--cache', str(game / '.gamebuild'), '--work', str(work)]
     if subprocess.run(cmd, cwd=ROOT).returncode: raise RuntimeError(f'Preparation failed; see {work}')
     result = json.loads((work / 'prepared.json').read_text())
-    files = ((work / 'input/exefs/subsdk9', 'subsdk9'), (work / 'lumiose.dll', 'lumiose.dll'),
-             (work / 'lasgame.dll', 'lasgame.dll'), (vanilla_id, 'lasgame.dll.id'))
+    files = ((work / 'input/exefs/subsdk9', 'subsdk9'), (work / MODULE_LIBRARY, MODULE_LIBRARY),
+             (work / GAME_LIBRARY, GAME_LIBRARY), (vanilla_id, GAME_LIBRARY + '.id'))
     version_dir = result['build_id'] + '-' + sha(reference)[:16]
     versions = mod / 'versions'
     versions.mkdir(exist_ok=True)
@@ -58,14 +61,14 @@ def main():
         shutil.copy2(src, staged / name)
         if sha(src) != sha(staged / name): raise RuntimeError('A prepared file did not verify')
     os.replace(staged, dest)
-    shutil.copy2(vanilla_id, mod / 'lasgame.dll.id')
+    shutil.copy2(vanilla_id, mod / (GAME_LIBRARY + '.id'))
     sd = install / 'save/sdcard/atmosphere/contents/0100F43008C44000/exefs/subsdk9'
     # Only mark the SD-card file consumed if it is the exact mod we prepared.
     seen = sha(sd) if sd.is_file() and sha(sd) == sha(reference) else None
     config = {'install': str(install), 'reference': str(reference), 'vanilla': str(vanilla),
               'zig': str(zig), 'cache': str(game / '.gamebuild'), 'server': args.server}
     state = {'build_id': result['build_id'], 'version': result['version'], 'version_dir': version_dir,
-             'compat_revision': 1, 'download_hash': seen, 'active_hashes': {name: sha(dest / name) for _, name in files}}
+             'compat_revision': 1 if WINDOWS else 2, 'download_hash': seen, 'active_hashes': {name: sha(dest / name) for _, name in files}}
     (mod / 'config.json').write_text(json.dumps(config, indent=2) + '\n')
     tmp = state_path.with_suffix('.tmp')
     tmp.write_text(json.dumps(state, indent=2) + '\n')
