@@ -1,0 +1,28 @@
+name: Lumiose Linux package (experimental)
+on:
+  push:
+    branches: [codex/steamdeck-zig-probe]
+    paths: ['.github/workflows/lumiose-linux-package.yml']
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build environment
+        run: docker build -t za-linux-build -f tools/linux/Containerfile tools/linux
+      - name: Build and package without game files
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src za-linux-build bash -euo pipefail -c '
+            git config --global --add safe.directory /src
+            apt-get update -qq
+            apt-get install -y --no-install-recommends dotnet-sdk-8.0 python3-venv zip
+            JOBS=4 PYTHON=python3.12 ZIP=0 DEB=0 tools/za/dist-linux.sh
+            bash tools/lumiose/package_linux.sh
+            cd build/dist
+            zip -qry Lumiose-Online-linux-experimental.zip "Lumiose Online Linux"'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumiose-Online-linux-experimental
+          path: build/dist/Lumiose-Online-linux-experimental.zip
+          if-no-files-found: error

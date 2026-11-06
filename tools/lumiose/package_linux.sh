@@ -24,7 +24,9 @@ cp lumiose/subsdk9 "$d/lumiose/subsdk9"
 cp third_party/rnnoise/COPYING "$d/RNNOISE-LICENSE.txt"
 cp LUMIOSE-RELEASE.md "$d/README-Windows-reference.md"
 cp -a /opt/python3.12 "$d/python"
-"$d/python/bin/python3.12" -m pip install --target "$d/python-deps" \
+venv="$PWD/build/linux/x86_64/lumiose-python-venv"
+/opt/python3.12/bin/python3.12 -m venv "$venv"
+"$venv/bin/python" -m pip install --target "$d/python-deps" \
   capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5
 cat > "$out/Lumiose Online" <<'EOF'
 #!/bin/sh
