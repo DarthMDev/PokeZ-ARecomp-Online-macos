@@ -7,6 +7,7 @@ appdir="$PWD/build/linux/x86_64/za-AppDir"
 out="$PWD/build/dist/Lumiose Online Linux"
 test -x "$appdir/usr/bin/lasrecomp"
 test -x "$appdir/usr/bin/zig/zig"
+test -x /opt/python3.12/bin/python3.12
 test -f lumiose/subsdk9
 if [ -e "$out" ]; then echo "Refusing to overwrite $out" >&2; exit 1; fi
 mkdir -p "$out"
@@ -22,22 +23,22 @@ cp -a runtime "$d/runtime"
 cp lumiose/subsdk9 "$d/lumiose/subsdk9"
 cp third_party/rnnoise/COPYING "$d/RNNOISE-LICENSE.txt"
 cp LUMIOSE-RELEASE.md "$d/README-Windows-reference.md"
-python3 -m venv "$PWD/build/linux/x86_64/lumiose-python-venv"
-"$PWD/build/linux/x86_64/lumiose-python-venv/bin/pip" install --target "$d/python-deps" \
+cp -a /opt/python3.12 "$d/python"
+"$d/python/bin/python3.12" -m pip install --target "$d/python-deps" \
   capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5
 cat > "$out/Lumiose Online" <<'EOF'
 #!/bin/sh
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE/usr/bin"
-exec python3 tools/lumiose/entry.py "$@"
+exec "$HERE/usr/bin/python/bin/python3.12" tools/lumiose/entry.py "$@"
 EOF
 chmod +x "$out/Lumiose Online"
 cat > "$out/READ ME.txt" <<'EOF'
 Lumiose Online for ZA Recomp - experimental Linux build
 
 Extract the complete archive to a writable folder, including on an SD card.
-Run "Lumiose Online" from that folder in Desktop Mode. Python 3 must be installed.
+Run "Lumiose Online" from that folder in Desktop Mode. Python is included.
 Choose your own game files, update 2.0.2, and DLC during first-time setup.
 The game files and generated game code are not included.
 

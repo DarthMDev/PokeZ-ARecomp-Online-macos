@@ -44,3 +44,19 @@ jobs:
           LUMIOSE_LIBRARY_OUTPUT="$RUNNER_TEMP/probe/lumiose.so" \
           PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" tools/lumiose/build_module.py
           python3 -c 'import ctypes,os; lib=ctypes.CDLL(os.environ["RUNNER_TEMP"]+"/probe/lumiose.so"); assert lib.lumiose_test_table()'
+          mkdir -p "$RUNNER_TEMP/probe/generated/main" "$RUNNER_TEMP/probe/generated/sdk" "$RUNNER_TEMP/probe/cache"
+          for module in main sdk; do
+            cat > "$RUNNER_TEMP/probe/generated/$module/${module}_table.c" <<EOF
+          #include "gamelib.h"
+          static void stub(Cpu *c) { (void)c; }
+          const uint64_t ${module}_fn_addrs[] = {0x7000000000ull};
+          const uint64_t ${module}_fn_count = 1;
+          const GuestFn ${module}_fn_ptrs[] = {stub};
+          EOF
+          done
+          printf 'abcd-1234\n' > "$RUNNER_TEMP/probe/game.id"
+          LUMIOSE_ZIG_DIR="$zig_dir" LUMIOSE_SCRATCH="$RUNNER_TEMP/probe" \
+          LUMIOSE_GAME_GEN="$RUNNER_TEMP/probe/generated" LUMIOSE_GAME_CACHE="$RUNNER_TEMP/probe/cache" \
+          LUMIOSE_GAME_ID_FILE="$RUNNER_TEMP/probe/game.id" LUMIOSE_GAME_OUTPUT="$RUNNER_TEMP/probe/lasgame.so" \
+          PYTHONPATH=tools/lumiose "$RUNNER_TEMP/test-venv/bin/python" tools/lumiose/build_patched_game.py
+          python3 -c 'import ctypes,os; lib=ctypes.CDLL(os.environ["RUNNER_TEMP"]+"/probe/lasgame.so"); assert lib.lasgame_tables()'
