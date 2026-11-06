@@ -1,7 +1,8 @@
 name: Lumiose Linux package (safe updater)
 on:
+  workflow_dispatch:
   push:
-    branches: [codex/steamdeck-zig-probe]
+    branches: [codex/steamdeck-zig-probe, pokemon-za]
     paths: ['.github/workflows/lumiose-linux-package.yml']
 jobs:
   package:
