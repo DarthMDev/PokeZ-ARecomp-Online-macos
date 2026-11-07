@@ -21,6 +21,7 @@ def main():
     p.add_argument('--support', type=Path, required=True, help='Clean ZA Recomp release support tools')
     p.add_argument('--python', type=Path, required=True, help='Portable CPython 3.12 folder')
     p.add_argument('--deps', type=Path, required=True, help='Python dependencies (unicorn, capstone, lz4)')
+    p.add_argument('--lasgen', type=Path, help='Freshly built generator folder (otherwise use the support folder)')
     p.add_argument('--out', type=Path, required=True, help='Empty destination folder')
     a = p.parse_args()
     out = a.out.resolve()
@@ -41,7 +42,7 @@ def main():
     copy_file(ROOT / 'third_party/rnnoise/COPYING', out / 'RNNOISE-LICENSE.txt')
     copy_file(ROOT / 'assets/lumiose_icon.png', out / 'icon.png')
     for n in ('zig', 'lasgen', 'zaimport', 'zaprompts', 'dx12', 'D3D12'):
-        src = a.support / n
+        src = a.lasgen if n == 'lasgen' and a.lasgen else a.support / n
         if not src.is_dir(): raise RuntimeError(f'Required support folder missing: {src}')
         shutil.copytree(src, out / n)
     for n in ('dx12/dzn_icd.x86_64.json', 'dx12/vulkan_dzn.dll', 'dx12/Mesa-LICENSE.rst',

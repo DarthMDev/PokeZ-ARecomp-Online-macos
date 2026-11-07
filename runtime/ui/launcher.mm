@@ -103,7 +103,7 @@ static const char *build_version(const uint8_t id[8]) {
 static bool build_is_za(const uint8_t id[8]) { return build_version(id) && memcmp(id, BUILD_ID, 8); }
 // The release tag this build is (also names the release files; Makefile / tools/bundle_macos.sh / make_dmg.sh read
 // it): ZA Recomp's v<major>.<minor>.<patch> (Hexveil404/PokeZ-ARecomp releases).
-#define LARECOMP_VERSION "v0.1.24"
+#define LARECOMP_VERSION "v0.1.25"
 extern "C" void rt_launcher_log(const char *fmt, ...);  // runtime/launcher_log.c: logs/launcher.log and stderr
 extern "C" const char *rt_version(void) { return LARECOMP_VERSION; }  // (runtime/main.c: the log's first line)
 extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }  // (the shader caches' tag)
@@ -2308,6 +2308,16 @@ static float party_panel(ImDrawList *dl, float x, float y, float w) {
     return 26 + ch;
 }
 
+static void lumiose_setup_complete(void) {
+    const char *path = getenv("LUMIOSE_SETUP_DONE");
+    if (path && *path) {
+        FILE *f = fopen(path, "wb");
+        if (!f) exit(1);
+        if (fputs("ready\n", f) < 0 || fclose(f) != 0) exit(1);
+    }
+    exit(0);
+}
+
 extern "C" void launcher_run(const char *root) {
     g_root = root;
     g_start_screen = 1;
@@ -2388,7 +2398,7 @@ extern "C" void launcher_run(const char *root) {
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
 
     std::string status = check_game_files(g_root);
-    if (getenv("LUMIOSE_FIRST_SETUP") && status.empty()) exit(0);
+    if (getenv("LUMIOSE_FIRST_SETUP") && status.empty()) lumiose_setup_complete();
     if (status.empty() && prompts_wanted()) make_prompts(false);  // (set up before the icons existed: made now, aside)
     g_tab = TAB_PLAY, g_focus_play = true, g_changing_folder = false;
     g_mods_changed = true, g_save_scanned = false;
@@ -2506,7 +2516,7 @@ extern "C" void launcher_run(const char *root) {
         static bool was_busy;
         if (was_busy && !busy) {
             status = check_game_files(g_root);
-            if (getenv("LUMIOSE_FIRST_SETUP") && status.empty()) exit(0);
+            if (getenv("LUMIOSE_FIRST_SETUP") && status.empty()) lumiose_setup_complete();
             if (status.empty()) g_changing_folder = false, g_focus_play = true;
         }
         was_busy = busy;

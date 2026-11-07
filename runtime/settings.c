@@ -59,6 +59,7 @@ Settings g_settings = {
     .show_fps = false,
     .fps60_lock = true,  // ("Drop to 30 fps when needed" off unless the player turns it on)
     .smooth_anim = true,  // (Pokémon Z-A 2.0.2: distant characters animate every frame)
+    .camera_distance = 100,
     .frame_dt = true,    // (Pokémon Z-A: the world step from a wall-clock accumulator - the same speed at any frame rate)
     .tex_hd = true,
     .tex_hd_cache_mb = 512,
@@ -313,6 +314,7 @@ void settings_load(void) {
         else if (!strcmp(key, "fps60_lock")) g_settings.fps60_lock = atoi(val) != 0;
         else if (!strcmp(key, "frame_dt")) g_settings.frame_dt = atoi(val) != 0;
         else if (!strcmp(key, "smooth_anim")) g_settings.smooth_anim = atoi(val) != 0;
+        else if (!strcmp(key, "camera_distance")) { int n = atoi(val); g_settings.camera_distance = n < 50 ? 50 : n > 200 ? 200 : n; }
         else if (!strcmp(key, "hdr")) g_settings.hdr = atoi(val) != 0;
         else if (!strcmp(key, "hdr_peak_nits")) { int n = atoi(val); g_settings.hdr_peak = n < 200 ? 200 : n > 10000 ? 10000 : n; }
         else if (!strcmp(key, "hdr_paper_white_nits")) { int n = atoi(val); g_settings.hdr_paper = n < 80 ? 80 : n > 500 ? 500 : n; }
@@ -462,6 +464,7 @@ void settings_save(void) {
     fprintf(f, "fps60_lock = %d\n", g_settings.fps60_lock);
     fprintf(f, "frame_dt = %d\n", g_settings.frame_dt);
     fprintf(f, "smooth_anim = %d\n", g_settings.smooth_anim);
+    fprintf(f, "camera_distance = %d\n", g_settings.camera_distance);
     fprintf(f, "aniso16 = %d\n", g_settings.aniso16);
     fprintf(f, "hdr = %d\n", g_settings.hdr);
     fprintf(f, "hdr_peak_nits = %d\n", g_settings.hdr_peak);

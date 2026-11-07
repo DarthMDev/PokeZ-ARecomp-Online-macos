@@ -20,6 +20,8 @@ class UpdateTests(unittest.TestCase):
         for name in ('subsdk9', launcher.MODULE_LIBRARY, launcher.GAME_LIBRARY):
             (self.mod / name).write_bytes(('old ' + name).encode())
         (self.mod / (launcher.GAME_LIBRARY + '.id')).write_text('game-id')
+        (self.install / 'extracted').mkdir()
+        (self.install / 'extracted' / (launcher.GAME_LIBRARY + '.id')).write_text('game-id')
         self.download = self.install / 'save/sdcard/atmosphere/contents/0100F43008C44000/exefs/subsdk9'
         self.download.parent.mkdir(parents=True)
         self.download.write_bytes(b'old download')
@@ -69,6 +71,36 @@ class UpdateTests(unittest.TestCase):
                 launcher.launch(self.config)
             launch.assert_not_called()
             self.assertEqual(json.loads(self.state.read_text()), self.initial)
+
+    def test_launcher_upgrade_rebuilds_active_mod_for_new_game_code(self):
+        new_id = self.install / 'extracted' / (launcher.GAME_LIBRARY + '.id')
+        new_id.write_text('new-game-id')
+        def prepare(cmd, **kwargs):
+            self.assertEqual(Path(cmd[cmd.index('--candidate') + 1]), self.mod / 'subsdk9')
+            work = Path(cmd[cmd.index('--work') + 1]); staged = work / 'input/exefs/subsdk9'
+            staged.parent.mkdir(parents=True); staged.write_bytes((self.mod / 'subsdk9').read_bytes())
+            (work / launcher.MODULE_LIBRARY).write_bytes(b'new module')
+            (work / launcher.GAME_LIBRARY).write_bytes(b'new game code')
+            (work / 'prepared.json').write_text(json.dumps({'build_id': 'a' * 40, 'version': [1, 3, 9, 1]}))
+            return type('Result', (), {'returncode': 0})()
+        with patch.object(launcher.subprocess, 'run', side_effect=prepare) as run, patch.object(launcher.subprocess, 'Popen') as start:
+            launcher.launch(self.config)
+            self.assertEqual(run.call_count, 1); start.assert_called_once()
+            state = json.loads(self.state.read_text())
+            self.assertEqual((self.mod / 'versions' / state['version_dir'] / (launcher.GAME_LIBRARY + '.id')).read_text(), 'new-game-id')
+            self.assertEqual((self.mod / (launcher.GAME_LIBRARY + '.id')).read_text(), 'new-game-id')
+            launcher.launch(self.config, prepare_only=True)
+            self.assertEqual(run.call_count, 1)
+
+    def test_launcher_upgrade_failure_leaves_previous_state_and_id(self):
+        (self.install / 'extracted' / (launcher.GAME_LIBRARY + '.id')).write_text('new-game-id')
+        with patch.object(launcher.subprocess, 'run') as run, patch.object(launcher.subprocess, 'Popen') as start:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(RuntimeError, 'could not be prepared'):
+                launcher.launch(self.config)
+            start.assert_not_called()
+            self.assertEqual(json.loads(self.state.read_text()), self.initial)
+            self.assertEqual((self.mod / (launcher.GAME_LIBRARY + '.id')).read_text(), 'game-id')
 
     def test_success_activates_complete_matching_set(self):
         self.download.write_bytes(b'new download')

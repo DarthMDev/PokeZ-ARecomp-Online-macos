@@ -85,6 +85,26 @@ def run(command, env, log):
         raise RuntimeError(f'Preparation failed (see {log})')
 
 
+def smoke_version(contents):
+    """Validate a live title or HUD without requiring the player to enter the overworld."""
+    if '[crash]' in contents or '*** exception' in contents or 'no function at ' in contents:
+        raise RuntimeError('The isolated startup reported a crash')
+    if '[violetmp][gate] hooks installed: 0 address misses' not in contents:
+        return None
+    # A fresh isolated save can remain at the title screen: there is no HUD to size there. The mod's renderer and
+    # three present callbacks demonstrate that its UI initialized and is receiving frames, even when it stays hidden.
+    title_ready = ('[ui] renderer ready' in contents and
+                   re.search(r'\[ui\] present (?:[3-9]|[1-9]\d+):', contents))
+    if '[ui] HUD size:' not in contents and not title_ready:
+        return None
+    version = re.search(r'\[update\] this build is (\d+)\.(\d+)\.(\d+) build (\d+) \(platform (\d+), channel (\d+)\)', contents)
+    if not version:
+        raise RuntimeError('The updated mod did not identify its version')
+    if int(version.group(5)) != 2:
+        raise RuntimeError('The download is not the recomp version of Lumiose')
+    return [int(x) for x in version.groups()[:4]]
+
+
 def capture(exe, game, work, module, library, gamelib, build_id, *, snapshot, secs=60):
     env = os.environ.copy()
     env.update(LARECOMP_DATA_ROOT=str(work), LARECOMP_SAVE_DIR=str(work / 'isolated-save'),
@@ -116,13 +136,10 @@ def capture(exe, game, work, module, library, gamelib, build_id, *, snapshot, se
                     continue
                 if snapshot and '[lumiose test] wrote local module snapshots' in contents:
                     return
-                if not snapshot and '[ui] HUD size:' in contents:
-                    version = re.search(r'\[update\] this build is (\d+)\.(\d+)\.(\d+) build (\d+) \(platform (\d+), channel (\d+)\)', contents)
-                    if not version:
-                        raise RuntimeError('The updated mod did not identify its version')
-                    if int(version.group(5)) != 2:
-                        raise RuntimeError('The download is not the recomp version of Lumiose')
-                    return [int(x) for x in version.groups()[:4]]
+                if not snapshot:
+                    version = smoke_version(contents)
+                    if version is not None:
+                        return version
             raise RuntimeError(f'Isolated startup did not finish (see {log})')
         finally:
             p.terminate()

@@ -524,6 +524,15 @@ static void tab_display(bool in_game) {
     }
     opt_toggle(TR("Show FPS", "Mostrar FPS"), &g_settings.show_fps, false,
                TR("Shows the frame rate in the top right corner.", "Mostra a taxa de quadros no canto superior direito."));
+    if (!la) {
+        float distance = (float)g_settings.camera_distance;
+        if (opt_slider(TR("Camera distance", "Distância da câmera"), &distance, 50, 200, 5, 100, "%g%%",
+                       TR("Move the follow camera closer or farther away. 100% is the game's normal distance. "
+                          "Applies while playing Pokémon Z-A version 2.0.2.",
+                          "Aproxima ou afasta a câmera. 100% é a distância normal do jogo. "
+                          "Funciona em Pokémon Z-A versão 2.0.2.")))
+            g_settings.camera_distance = (int)distance;
+    }
     {   // Pokémon Z-A's frame mode (runtime/hle/framepace.c rt_za_frame_cfg): applies from the next frame. Two rows: the
         // rate, and whether 60 falls back to 30 by itself (fps60_lock off) - that fallback is the player's own choice,
         // the recommended settings (settings.c) set 60 without it. Shown on the start screen too (saved for the next

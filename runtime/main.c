@@ -14,6 +14,10 @@
 #include "platform.h"
 #include "gamebuild.h"  // (gamelib_old_cpu)
 #include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <wchar.h>
+#endif
 #ifdef __linux__
 #include <unistd.h>
 #endif
@@ -315,9 +319,44 @@ static void lumiose_linux_entry(void) {
 }
 #endif
 
+#ifdef _WIN32
+// An update from an older launcher restarts lasrecomp.exe directly. In a Lumiose package, return through the entry
+// point so it can rebuild and re-prepare the mod before Play. Normal launches from entry already carry its marker.
+static void lumiose_windows_entry(void) {
+    if (getenv("LUMIOSE_ENTRY_ACTIVE") || getenv("LUMIOSE_FIRST_SETUP") || getenv("LARECOMP_NO_LAUNCHER") ||
+        getenv("LARECOMP_LAUNCHER_SHOT")) return;
+    wchar_t dir[32768], mod[32768], wrapper[32768], updated[32768];
+    DWORD n = GetModuleFileNameW(NULL, dir, 32768);
+    if (!n || n >= 32768) return;
+    wchar_t *slash = wcsrchr(dir, L'\\');
+    if (!slash) return;
+    *slash = 0;
+    if (swprintf(mod, 32768, L"%ls\\lumiose\\subsdk9", dir) < 0 ||
+        GetFileAttributesW(mod) == INVALID_FILE_ATTRIBUTES) return;
+    if (swprintf(updated, 32768, L"%ls\\_updated.txt", dir) < 0) return;
+    if (getenv("LUMIOSE_TEST_MODULE") && GetFileAttributesW(updated) == INVALID_FILE_ATTRIBUTES) return;
+    if (swprintf(wrapper, 32768, L"%ls\\Lumiose Online.exe", dir) < 0 ||
+        GetFileAttributesW(wrapper) == INVALID_FILE_ATTRIBUTES) {
+        MessageBoxW(NULL, L"Lumiose Online.exe is missing. Extract the complete release again.", L"Lumiose Online", MB_OK | MB_ICONERROR);
+        exit(1);
+    }
+    STARTUPINFOW si = {0}; PROCESS_INFORMATION pi = {0}; si.cb = sizeof si;
+    if (!CreateProcessW(wrapper, NULL, NULL, NULL, FALSE, CREATE_BREAKAWAY_FROM_JOB, NULL, dir, &si, &pi) &&
+        !CreateProcessW(wrapper, NULL, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi)) {
+        MessageBoxW(NULL, L"Could not start Lumiose Online.exe.", L"Lumiose Online", MB_OK | MB_ICONERROR);
+        exit(1);
+    }
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    exit(0);
+}
+#endif
+
 int main(int argc, char **argv) {
 #ifdef __linux__
     lumiose_linux_entry();
+#endif
+#ifdef _WIN32
+    lumiose_windows_entry();
 #endif
     plat_init();
     log_startup_info();

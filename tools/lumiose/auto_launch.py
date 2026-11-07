@@ -40,15 +40,21 @@ def launch(config_path, prepare_only=False):
     if not state_path.is_file():
         raise RuntimeError('Update setup is incomplete; no mod was started')
     state = json.loads(state_path.read_text(encoding='utf-8'))
-    id_file = mod_dir / (GAME_LIBRARY + '.id')
-    if not id_file.is_file():
+    mod_id = mod_dir / (GAME_LIBRARY + '.id')
+    id_file = game / (GAME_LIBRARY + '.id')
+    if not mod_id.is_file() or not id_file.is_file():
         raise RuntimeError('The game-code identification file is missing')
     baseline = state.get('download_hash')
     current_hash = digest(candidate)
     active_name = state.get('version_dir')
     if active_name and Path(active_name).name != active_name:
         raise RuntimeError('Invalid active update path')
-    active_module = (mod_dir / 'versions' / active_name if active_name else mod_dir) / 'subsdk9'
+    active_dir = mod_dir / 'versions' / active_name if active_name else mod_dir
+    active_module = active_dir / 'subsdk9'
+    active_id = active_dir / (GAME_LIBRARY + '.id')
+    if not active_id.is_file():  # older prepared versions kept this file only in lumiose/
+        active_id = mod_id
+    game_rebuild = digest(active_id) != digest(id_file)
     if (current_hash and current_hash != baseline and not state.get('force_rebuild_same_module') and
             current_hash == state.get('active_hashes', {}).get('subsdk9')):
         if digest(active_module) != current_hash:
@@ -63,7 +69,7 @@ def launch(config_path, prepare_only=False):
     linux_refresh = not WINDOWS and state.get('compat_revision', 0) < 2
     switch_refresh = (state.get('build_id') == 'c754ba10deedfed696a55010c8dd9131c508a647'
                       and state.get('compat_revision', 0) < 1)
-    refresh = not downloaded and (linux_refresh or switch_refresh)
+    refresh = not downloaded and (linux_refresh or switch_refresh or game_rebuild)
     if refresh:
         if digest(active_module) != state.get('active_hashes', {}).get('subsdk9'):
             raise RuntimeError('The active mod failed verification')
@@ -100,7 +106,9 @@ def launch(config_path, prepare_only=False):
                 raise RuntimeError('The downloaded mod is not newer than the active version')
         versions = mod_dir / 'versions'
         versions.mkdir(exist_ok=True)
-        suffix = ('-volatile2' if linux_refresh else '-switch1') if refresh else ''
+        suffix = ('-volatile2' if linux_refresh else '-switch1') if refresh and not game_rebuild else ''
+        if game_rebuild:
+            suffix += '-game-' + digest(id_file)[:12]
         name = build_id + '-' + current_hash[:16] + suffix
         target = versions / name
         files = ((work / 'input' / 'exefs' / 'subsdk9', 'subsdk9'),
@@ -133,13 +141,18 @@ def launch(config_path, prepare_only=False):
     if active != mod_dir and not (active / (GAME_LIBRARY + '.id')).is_file():
         # Repair versions produced by the earlier updater, which omitted this
         # launcher-side identification file even though the library was valid.
-        shutil.copy2(id_file, active / (GAME_LIBRARY + '.id'))
+        shutil.copy2(mod_id, active / (GAME_LIBRARY + '.id'))
     if digest(active / (GAME_LIBRARY + '.id')) != digest(id_file):
         raise RuntimeError('The active game-code identification does not match')
     for name in ('subsdk9', MODULE_LIBRARY, GAME_LIBRARY):
         if not (active / name).is_file(): raise RuntimeError(f'The active mod is missing {name}')
         if state.get('active_hashes', {}).get(name) != digest(active / name):
             raise RuntimeError(f'The active mod file {name} failed verification')
+    if digest(mod_id) != digest(id_file):
+        # The active set is already verified. If a previous run stopped after switching it, finish the sidecar update.
+        temp_id = mod_id.with_suffix('.id.tmp')
+        shutil.copy2(id_file, temp_id)
+        os.replace(temp_id, mod_id)
     env = os.environ.copy()
     env.update(LARECOMP_DATA_ROOT=str(install), LARECOMP_GAME_LIB=str(active / GAME_LIBRARY),
                LUMIOSE_TEST_MODULE=str(active / 'subsdk9'), LUMIOSE_TEST_LIBRARY=str(active / MODULE_LIBRARY),

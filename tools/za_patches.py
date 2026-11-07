@@ -63,6 +63,19 @@ def _za_frame_step(gen, a):
 # game on macOS/Metal). 2.0.2 only: the address and the word are checked there and nowhere else.
 SMOOTH_ANIM = {'b1f12fd919eae86a': 0x7001dcdf60}
 
+# The follow camera asks for its computed offset via f_700009a11c. At this instruction the returned structure has
+# been assembled; the runtime checks both its class and caller before applying the player's distance setting.
+CAMERA_DISTANCE = {'b1f12fd919eae86a': 0x700009a138}
+
+
+def _za_camera_distance(gen, a):
+    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+    assert w == 0x910b0260, hex(w)  # add x0, x19, #0x2c0
+    return ('{ extern void rt_za_camera_distance(uint64_t, uint64_t); '
+            'rt_za_camera_distance(c->x[19], LD64(c->sp + 8)); '
+            'c->x[0] = c->x[19] + 0x2c0; }'
+            f'  /* {a:#x}: follow-camera offset */')
+
 
 def _za_smooth_anim(gen, a):
     w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
@@ -80,4 +93,6 @@ def za_patches(build):
         out[FRAME_STEP[build]] = _za_frame_step
     if build in SMOOTH_ANIM:
         out[SMOOTH_ANIM[build]] = _za_smooth_anim
+    if build in CAMERA_DISTANCE:
+        out[CAMERA_DISTANCE[build]] = _za_camera_distance
     return out

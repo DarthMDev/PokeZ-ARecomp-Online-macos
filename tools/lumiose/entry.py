@@ -4,11 +4,24 @@ from pathlib import Path
 import subprocess
 import sys
 import shutil
+import tempfile
+from datetime import datetime
 
 ROOT = Path(__file__).resolve().parents[2]
+GAME_CODE_REVISION = 'camera-distance-v1'
 sys.path.insert(0, str(ROOT / 'tools' / 'lumiose'))
 from auto_launch import launch
 from platform_paths import EXECUTABLE, GAME_LIBRARY, lock_file
+
+
+def log_event(message):
+    try:
+        logs = ROOT / 'logs'
+        logs.mkdir(parents=True, exist_ok=True)
+        with (logs / 'lumiose-launch.log').open('a', encoding='utf-8') as f:
+            f.write(f'{datetime.now().isoformat(timespec="seconds")} {message}\n')
+    except OSError:
+        pass  # Diagnostics must not stop the launcher.
 
 
 def desktop_notice(title, message, error=False):
@@ -22,13 +35,21 @@ def desktop_notice(title, message, error=False):
 
 def main():
     os.chdir(ROOT)
+    # A runtime restarted by the launcher updater must return through this entry point once. Child runtimes inherit
+    # this marker so they do not route back here again while the update notification still exists.
+    os.environ['LUMIOSE_ENTRY_ACTIVE'] = '1'
     os.environ['PYTHONPATH'] = str(ROOT / 'python-deps') + os.pathsep + os.environ.get('PYTHONPATH', '')
     mod = ROOT / 'lumiose'
     config = mod / 'config.json'
     state = mod / 'update-state.json'
-    if not state.exists():
-        print('First-time setup: choose your own Pokémon Legends Z-A 2.0.2 game files in the launcher.', flush=True)
-        print('When game setup finishes, Lumiose will be prepared automatically. Keep this window open.', flush=True)
+    revision = mod / 'launcher-code-revision.txt'
+    first_setup = not state.exists()
+    current_revision = revision.read_text(encoding='utf-8').strip() if revision.is_file() else ''
+    log_event(f'Launcher started; initial setup required: {first_setup}; game-code revision check required: {current_revision != GAME_CODE_REVISION}')
+    if first_setup or current_revision != GAME_CODE_REVISION:
+        print('Checking game setup for this launcher. Keep this window open.', flush=True)
+        if first_setup:
+            print('Choose your own Pokémon Legends Z-A 2.0.2 game files; Lumiose will prepare automatically.', flush=True)
         env = os.environ.copy()
         env['LARECOMP_DATA_ROOT'] = str(ROOT)
         env['LUMIOSE_FIRST_SETUP'] = '1'
@@ -37,14 +58,21 @@ def main():
             env.pop(key, None)
         if os.environ.get('LUMIOSE_RELEASE_TEST_PREPARE_ONLY') != '1':
             env.pop('LARECOMP_HIDDEN', None)
-        result = subprocess.run([str(ROOT / EXECUTABLE), str(ROOT / 'extracted')], cwd=ROOT, env=env)
-        if result.returncode or not (ROOT / 'extracted' / (GAME_LIBRARY + '.id')).is_file():
-            raise RuntimeError('Game setup was not completed. Start Lumiose Online again when you are ready.')
+        with tempfile.TemporaryDirectory(prefix='game-check-', dir=mod) as temp:
+            done = Path(temp) / 'ready'
+            env['LUMIOSE_SETUP_DONE'] = str(done)
+            result = subprocess.run([str(ROOT / EXECUTABLE), str(ROOT / 'extracted')], cwd=ROOT, env=env)
+            if result.returncode or not done.is_file() or not (ROOT / 'extracted' / (GAME_LIBRARY + '.id')).is_file():
+                raise RuntimeError('Game setup was not completed. Start Lumiose Online again when you are ready.')
+        log_event('Game setup check completed')
+    if first_setup:
+        log_event('Preparing bundled Lumiose for first launch')
         cmd = [sys.executable, str(ROOT / 'tools/lumiose/setup.py'), '--install', str(ROOT),
                '--zig', str(ROOT / 'zig'), '--server', '135.148.167.226:27777']
         desktop_notice('Lumiose Online', 'Preparing the online mod. This may take several minutes.')
         if subprocess.run(cmd, cwd=ROOT).returncode:
             raise RuntimeError('Lumiose preparation did not finish; see the message above.')
+        log_event('Bundled Lumiose preparation completed')
     if not config.is_file():
         raise RuntimeError('Lumiose configuration is missing. Your save files have not been changed.')
     # Rewrite paths when the player moves the installed folder.
@@ -54,7 +82,13 @@ def main():
                vanilla=str(ROOT / 'extracted' / GAME_LIBRARY), zig=str(ROOT / 'zig'),
                cache=str(ROOT / 'extracted/.gamebuild'))
     config.write_text(json.dumps(cfg, indent=2) + '\n', encoding='utf-8')
+    log_event('Checking active Lumiose build and updates')
     launch(config, prepare_only=os.environ.get('LUMIOSE_RELEASE_TEST_PREPARE_ONLY') == '1')
+    log_event('Lumiose preparation completed; launcher started')
+    if current_revision != GAME_CODE_REVISION:
+        tmp = revision.with_suffix('.tmp')
+        tmp.write_text(GAME_CODE_REVISION + '\n', encoding='utf-8')
+        os.replace(tmp, revision)
 
 
 if __name__ == '__main__':
@@ -70,6 +104,7 @@ if __name__ == '__main__':
             except OSError: raise RuntimeError('Another Lumiose launcher is already preparing an update')
             main()
     except Exception as e:
+        log_event('Launcher failed: ' + str(e))
         print('\nLumiose could not start:', e, file=sys.stderr, flush=True)
         desktop_notice('Lumiose Online could not start', str(e) + '\nDetails: logs/lumiose-launch.log', error=True)
         if sys.stdin.isatty(): input('Press Enter to close this window. ')
