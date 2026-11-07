@@ -60,7 +60,9 @@ def main():
             env.pop('LARECOMP_HIDDEN', None)
         with tempfile.TemporaryDirectory(prefix='game-check-', dir=mod) as temp:
             done = Path(temp) / 'ready'
-            env['LUMIOSE_SETUP_DONE'] = str(done)
+            # The launcher changes to ROOT before writing this marker. A relative ASCII path also avoids passing a
+            # potentially non-ASCII Windows installation path through the C runtime's narrow fopen().
+            env['LUMIOSE_SETUP_DONE'] = os.path.relpath(done, ROOT)
             result = subprocess.run([str(ROOT / EXECUTABLE), str(ROOT / 'extracted')], cwd=ROOT, env=env)
             if result.returncode or not done.is_file() or not (ROOT / 'extracted' / (GAME_LIBRARY + '.id')).is_file():
                 raise RuntimeError('Game setup was not completed. Start Lumiose Online again when you are ready.')
