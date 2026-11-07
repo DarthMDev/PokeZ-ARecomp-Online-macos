@@ -9,6 +9,7 @@ from datetime import datetime
 
 ROOT = Path(__file__).resolve().parents[2]
 GAME_CODE_REVISION = 'camera-distance-v1'
+LAUNCHER_VERSION = 'v0.1.26'
 sys.path.insert(0, str(ROOT / 'tools' / 'lumiose'))
 from auto_launch import launch
 from platform_paths import EXECUTABLE, GAME_LIBRARY, lock_file
@@ -37,7 +38,7 @@ def main():
     os.chdir(ROOT)
     # A runtime restarted by the launcher updater must return through this entry point once. Child runtimes inherit
     # this marker so they do not route back here again while the update notification still exists.
-    os.environ['LUMIOSE_ENTRY_ACTIVE'] = '1'
+    os.environ['LUMIOSE_ENTRY_ACTIVE'] = LAUNCHER_VERSION
     os.environ['PYTHONPATH'] = str(ROOT / 'python-deps') + os.pathsep + os.environ.get('PYTHONPATH', '')
     mod = ROOT / 'lumiose'
     config = mod / 'config.json'

@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,12 @@ spec.loader.exec_module(entry)
 
 
 class EntryTests(unittest.TestCase):
+    def test_entry_version_matches_launcher(self):
+        source = (Path(__file__).resolve().parents[2] / 'runtime/ui/launcher.mm').read_text(encoding='utf-8')
+        version = re.search(r'^#define LARECOMP_VERSION "([^"]+)"', source, re.M)
+        self.assertIsNotNone(version)
+        self.assertEqual(entry.LAUNCHER_VERSION, version.group(1))
+
     def test_first_setup_prepares_mod_before_launch(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

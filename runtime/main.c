@@ -323,7 +323,9 @@ static void lumiose_linux_entry(void) {
 // An update from an older launcher restarts lasrecomp.exe directly. In a Lumiose package, return through the entry
 // point so it can rebuild and re-prepare the mod before Play. Normal launches from entry already carry its marker.
 static void lumiose_windows_entry(void) {
-    if (getenv("LUMIOSE_ENTRY_ACTIVE") || getenv("LUMIOSE_FIRST_SETUP") || getenv("LARECOMP_NO_LAUNCHER") ||
+    extern const char *rt_version(void);
+    const char *entry_version = getenv("LUMIOSE_ENTRY_ACTIVE");
+    if ((entry_version && !strcmp(entry_version, rt_version())) || getenv("LUMIOSE_FIRST_SETUP") || getenv("LARECOMP_NO_LAUNCHER") ||
         getenv("LARECOMP_LAUNCHER_SHOT")) return;
     wchar_t dir[32768], mod[32768], wrapper[32768], updated[32768];
     DWORD n = GetModuleFileNameW(NULL, dir, 32768);

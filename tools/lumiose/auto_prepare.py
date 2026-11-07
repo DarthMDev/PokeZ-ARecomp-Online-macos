@@ -121,31 +121,43 @@ def capture(exe, game, work, module, library, gamelib, build_id, *, snapshot, se
         env.pop('LUMIOSE_TEST_DUMP', None)
     env['PATH'] = str(exe.parent) + os.pathsep + env.get('PATH', '')
     log = work / ('capture.log' if snapshot else 'smoke.log')
-    with log.open('w', encoding='utf-8') as f:
-        p = subprocess.Popen([str(exe), str(game), '--play'], cwd=str(exe.parent), env=env,
-                             stdout=f, stderr=subprocess.STDOUT,
-                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        try:
-            start = time.monotonic()
-            while time.monotonic() - start < secs:
-                if p.poll() is not None:
-                    raise RuntimeError(f'Isolated startup exited unexpectedly (see {log})')
-                time.sleep(1)
-                contents = log.read_text(errors='replace')
-                if '[violetmp][gate] hooks installed: 0 address misses' not in contents:
-                    continue
-                if snapshot and '[lumiose test] wrote local module snapshots' in contents:
-                    return
-                if not snapshot:
-                    version = smoke_version(contents)
-                    if version is not None:
-                        return version
-            raise RuntimeError(f'Isolated startup did not finish (see {log})')
-        finally:
-            p.terminate()
-            try: p.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                p.kill(); p.wait()
+    for attempt in range(2):
+        retry = False
+        with log.open('w', encoding='utf-8') as f:
+            p = subprocess.Popen([str(exe), str(game), '--play'], cwd=str(exe.parent), env=env,
+                                 stdout=f, stderr=subprocess.STDOUT,
+                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            try:
+                start = time.monotonic()
+                while time.monotonic() - start < secs:
+                    contents = log.read_text(errors='replace')
+                    if '[crash]' in contents or '*** exception' in contents or 'no function at ' in contents:
+                        raise RuntimeError(f'Isolated startup reported a crash (see {log})')
+                    if p.poll() is not None:
+                        if attempt == 0 and not contents:
+                            retry = True
+                            break
+                        raise RuntimeError(f'Isolated startup exited unexpectedly (see {log})')
+                    if not contents and attempt == 0 and time.monotonic() - start >= min(20, secs / 2):
+                        retry = True
+                        break
+                    if '[violetmp][gate] hooks installed: 0 address misses' in contents:
+                        if snapshot and '[lumiose test] wrote local module snapshots' in contents:
+                            return
+                        if not snapshot:
+                            version = smoke_version(contents)
+                            if version is not None:
+                                return version
+                    time.sleep(1)
+                if not retry:
+                    raise RuntimeError(f'Isolated startup did not finish (see {log})')
+            finally:
+                if p.poll() is None:
+                    p.terminate()
+                    try: p.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        p.kill(); p.wait()
+        print('The isolated startup produced no output; trying once more...', flush=True)
 
 
 def patch_generated(work, build_id):
